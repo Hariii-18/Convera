@@ -1,6 +1,8 @@
 "use client";
 
 import { use, useState } from "react";
+import { useRouter } from "next/navigation";
+import { SearchX } from "lucide-react";
 import { toast } from "sonner";
 
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
@@ -13,63 +15,71 @@ import { MeetingWorkspaceLayout } from "@/components/meetings/workspace/meeting-
 import { WorkspaceHeader } from "@/components/meetings/workspace/workspace-header";
 import { WorkspaceNavigation } from "@/components/meetings/workspace/workspace-navigation";
 import type { WorkspaceTabValue } from "@/components/meetings/workspace/workspace-tabs";
-import {
-  mockDownloadsExports,
-  mockDownloadsHistory,
-  mockInfoPanelParticipants,
-  mockInfoPanelProcessing,
-  mockInfoPanelRecording,
-  mockInfoPanelTags,
-  mockMeetingMetadata,
-  mockOverviewActivity,
-  mockOverviewRecording,
-  mockOverviewStatistics,
-  mockOverviewSummary,
-  mockOverviewTimelineEvents,
-  mockSummaryActionItems,
-  mockSummaryDecisions,
-  mockSummaryExecutiveSummary,
-  mockSummaryNextSteps,
-  mockSummaryOpenQuestions,
-  mockSummaryRisks,
-  mockSummaryTopics,
-  mockTimelineEvents,
-  mockTranscriptBlocks,
-} from "./mock-data";
+import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { PageContainer } from "@/components/layout/page-container";
+import type { ActionItemData } from "@/components/meetings/summary/types";
+import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
+import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 
 type MeetingPageProps = {
   params: Promise<{ id: string }>;
 };
 
-/**
- * Single-meeting workspace, routed by id. Renders entirely from mock fixtures
- * in `./mock-data` — there is no API yet, so every tab shows the same fixture
- * meeting regardless of `id`.
- */
 export default function MeetingPage({ params }: MeetingPageProps) {
-  use(params);
+  const { id } = use(params);
+  const router = useRouter();
+
+  const { data: meeting, isLoading, isError } = useMeeting(id);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabValue>("overview");
 
   const [transcriptSearch, setTranscriptSearch] = useState("");
   const [transcriptEditMode, setTranscriptEditMode] = useState(false);
-  const [transcriptBlocks, setTranscriptBlocks] = useState(
-    mockTranscriptBlocks,
-  );
+  const [transcriptBlocks, setTranscriptBlocks] = useState<
+    TranscriptBlockData[]
+  >([]);
 
-  const [actionItems, setActionItems] = useState(mockSummaryActionItems);
+  const [actionItems, setActionItems] = useState<ActionItemData[]>([]);
 
   const [timelineSearch, setTimelineSearch] = useState("");
   const [timelineExpanded, setTimelineExpanded] = useState(false);
+
+  if (isLoading) {
+    return (
+      <PageContainer size="wide" className="py-16">
+        <span role="status" className="sr-only">
+          Loading meeting&hellip;
+        </span>
+      </PageContainer>
+    );
+  }
+
+  if (isError || !meeting) {
+    return (
+      <PageContainer size="wide" className="py-16">
+        <EmptyState
+          icon={<SearchX />}
+          title="Meeting not found"
+          description="This meeting doesn't exist or you don't have access to it."
+          action={
+            <Button size="sm" onClick={() => router.push("/meetings")}>
+              Back to meetings
+            </Button>
+          }
+        />
+      </PageContainer>
+    );
+  }
 
   return (
     <MeetingWorkspaceLayout
       header={
         <WorkspaceHeader
-          title={mockMeetingMetadata.title}
-          status={mockMeetingMetadata.status}
-          durationSeconds={mockMeetingMetadata.durationSeconds}
-          createdAt={mockMeetingMetadata.createdAt}
+          title={meeting.title}
+          status={meeting.status}
+          durationSeconds={meeting.durationSeconds}
+          createdAt={meeting.createdAt}
           onExport={() => toast("Export meeting")}
           onRename={() => toast("Rename meeting")}
           onDuplicate={() => toast("Duplicate meeting")}
@@ -81,23 +91,17 @@ export default function MeetingPage({ params }: MeetingPageProps) {
         <WorkspaceNavigation value={activeTab} onValueChange={setActiveTab} />
       }
       activeTab={activeTab}
-      sidePanel={
-        <MeetingInfoPanel
-          participants={mockInfoPanelParticipants}
-          tags={mockInfoPanelTags}
-          recording={mockInfoPanelRecording}
-          processing={mockInfoPanelProcessing}
-        />
-      }
+      sidePanel={<MeetingInfoPanel />}
     >
       {activeTab === "overview" && (
         <MeetingOverview
-          metadata={mockMeetingMetadata}
-          statistics={mockOverviewStatistics}
-          recording={mockOverviewRecording}
-          summary={mockOverviewSummary}
-          timelineEvents={mockOverviewTimelineEvents}
-          activity={mockOverviewActivity}
+          metadata={{
+            title: meeting.title,
+            status: meeting.status,
+            durationSeconds: meeting.durationSeconds,
+            createdAt: meeting.createdAt,
+            updatedAt: meeting.updatedAt,
+          }}
           onViewFullSummary={() => setActiveTab("summary")}
           onViewTimeline={() => setActiveTab("timeline")}
           onDownloadRecording={() => toast("Download recording")}
@@ -125,13 +129,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
       {activeTab === "summary" && (
         <SummaryViewer
-          executiveSummary={mockSummaryExecutiveSummary}
-          topics={mockSummaryTopics}
-          decisions={mockSummaryDecisions}
           actionItems={actionItems}
-          risks={mockSummaryRisks}
-          openQuestions={mockSummaryOpenQuestions}
-          nextSteps={mockSummaryNextSteps}
           onToggleActionItem={(id) =>
             setActionItems((items) =>
               items.map((item) =>
@@ -155,7 +153,6 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
       {activeTab === "timeline" && (
         <TimelineViewer
-          events={mockTimelineEvents}
           searchValue={timelineSearch}
           onSearchChange={setTimelineSearch}
           expanded={timelineExpanded}
@@ -166,8 +163,6 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
       {activeTab === "downloads" && (
         <DownloadsPanel
-          exports={mockDownloadsExports}
-          history={mockDownloadsHistory}
           onDownload={(format) => toast(`Download ${format.toUpperCase()}`)}
           onRegenerate={(format) =>
             toast(`Regenerate ${format.toUpperCase()}`)

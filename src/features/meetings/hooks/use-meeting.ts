@@ -1,0 +1,16 @@
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+
+import { meetingsApi } from "@/features/meetings/api";
+import { toMeeting } from "@/features/meetings/mappers";
+
+export function useMeeting(id: string) {
+  return useQuery({
+    queryKey: ["meetings", id],
+    queryFn: () => meetingsApi.get(id),
+    select: toMeeting,
+    enabled: Boolean(id),
+    retry: false,
+  });
+}
