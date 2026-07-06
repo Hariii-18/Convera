@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CalendarPlus, SlidersHorizontal } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarPlus,
+  History,
+  SlidersHorizontal,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { PageContainer } from "@/components/layout/page-container";
@@ -21,15 +26,23 @@ import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { useGuestSession } from "@/features/guest/guest-provider";
 
 export default function MeetingsPage() {
   const router = useRouter();
+  const { isGuest } = useGuestSession();
   const [search, setSearch] = useState("");
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
 
-  const { data: meetings, isLoading, isError, error, refetch } = useMeetings();
+  const {
+    data: meetings,
+    isLoading,
+    isError,
+    error,
+    refetch,
+  } = useMeetings({ enabled: !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
@@ -79,6 +92,28 @@ export default function MeetingsPage() {
           toast.error(extractErrorMessage(mutationError));
         },
       },
+    );
+  }
+
+  if (isGuest) {
+    return (
+      <PageContainer size="wide" className="flex flex-col gap-6">
+        <SectionHeader
+          as="h1"
+          title="Meetings"
+          description="Every meeting you record or upload will show up here."
+        />
+        <EmptyState
+          icon={<History />}
+          title="Meeting history needs an account"
+          description="Create a free account to save meetings and access your history anytime."
+          action={
+            <Button size="sm" onClick={() => router.push("/register")}>
+              Create free account
+            </Button>
+          }
+        />
+      </PageContainer>
     );
   }
 

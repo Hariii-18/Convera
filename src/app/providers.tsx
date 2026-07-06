@@ -8,6 +8,7 @@ import { createQueryClient } from "@/lib/query-client";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { SessionProvider } from "@/features/auth/session-provider";
+import { GuestProvider } from "@/features/guest/guest-provider";
 
 export function Providers({ children }: { children: ReactNode }) {
   const [queryClient] = useState(createQueryClient);
@@ -22,7 +23,7 @@ export function Providers({ children }: { children: ReactNode }) {
       <QueryClientProvider client={queryClient}>
         <TooltipProvider>
           <SessionProvider />
-          {children}
+          <GuestProvider>{children}</GuestProvider>
           <Toaster position="bottom-right" />
         </TooltipProvider>
       </QueryClientProvider>

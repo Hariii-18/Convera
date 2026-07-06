@@ -28,6 +28,9 @@ import { extractErrorMessage } from "@/features/auth/error";
 import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
+import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
+import { useGuestGate } from "@/features/guest/use-guest-gate";
+import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
 
 type MeetingPageProps = {
   params: Promise<{ id: string }>;
@@ -36,8 +39,15 @@ type MeetingPageProps = {
 export default function MeetingPage({ params }: MeetingPageProps) {
   const { id } = use(params);
   const router = useRouter();
+  const { isGuest, pendingAction, guard, closeDialog } = useGuestGate();
+  const guestMeeting = useGuestMeetingsStore((state) => state.getMeeting(id));
 
-  const { data: meeting, isLoading, isError } = useMeeting(id);
+  const {
+    data: fetchedMeeting,
+    isLoading,
+    isError,
+  } = useMeeting(id, { enabled: !isGuest });
+  const meeting = isGuest ? guestMeeting : fetchedMeeting;
   const updateMeeting = useUpdateMeeting(id);
   const deleteMeeting = useDeleteMeeting();
 
@@ -116,10 +126,14 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             durationSeconds={meeting.durationSeconds}
             createdAt={meeting.createdAt}
             onExport={() => toast("Export meeting")}
-            onRename={() => setRenameTarget(meeting)}
-            onDuplicate={() => toast("Duplicate meeting")}
-            onArchive={() => toast("Archive meeting")}
-            onDelete={() => setDeleteTarget(meeting)}
+            onRename={() => guard("rename-meeting", () => setRenameTarget(meeting))}
+            onDuplicate={() =>
+              guard("manage-meeting", () => toast("Duplicate meeting"))
+            }
+            onArchive={() =>
+              guard("manage-meeting", () => toast("Archive meeting"))
+            }
+            onDelete={() => guard("delete-meeting", () => setDeleteTarget(meeting))}
           />
         }
         navigation={
@@ -221,6 +235,11 @@ export default function MeetingPage({ params }: MeetingPageProps) {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         isPending={deleteMeeting.isPending}
+      />
+
+      <GuestUpgradeDialog
+        action={pendingAction}
+        onOpenChange={(open) => !open && closeDialog()}
       />
     </>
   );

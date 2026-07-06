@@ -42,15 +42,25 @@ import { useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
 import { RenameMeetingDialog } from "@/components/meetings/rename-meeting-dialog";
 import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog";
+import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
+import { useGuestGate } from "@/features/guest/use-guest-gate";
+import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { data: meetings, isLoading } = useMeetings();
+  const { isGuest, pendingAction, guard, closeDialog } = useGuestGate();
+  const guestMeetings = useGuestMeetingsStore((state) => state.meetings);
+  const addGuestMeeting = useGuestMeetingsStore((state) => state.addMeeting);
+
+  const { data: fetchedMeetings, isLoading } = useMeetings({
+    enabled: !isGuest,
+  });
+  const meetings = isGuest ? guestMeetings : fetchedMeetings;
   const {
     data: stats,
     isLoading: isStatsLoading,
     isError: isStatsError,
-  } = useDashboardStats();
+  } = useDashboardStats({ enabled: !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
@@ -58,35 +68,36 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
 
+  const statsUnavailable = isStatsError || isGuest;
   const dashboardStats: StatItem[] = [
     {
       title: "Total meetings",
       icon: Video,
-      value: isStatsError ? "—" : stats?.totalMeetings,
+      value: statsUnavailable ? "—" : stats?.totalMeetings,
       loading: isStatsLoading,
     },
     {
       title: "Processing",
       icon: Activity,
-      value: isStatsError ? "—" : stats?.processingMeetings,
+      value: statsUnavailable ? "—" : stats?.processingMeetings,
       loading: isStatsLoading,
     },
     {
       title: "Completed",
       icon: CheckCircle2,
-      value: isStatsError ? "—" : stats?.completedMeetings,
+      value: statsUnavailable ? "—" : stats?.completedMeetings,
       loading: isStatsLoading,
     },
     {
       title: "Failed",
       icon: XCircle,
-      value: isStatsError ? "—" : stats?.failedMeetings,
+      value: statsUnavailable ? "—" : stats?.failedMeetings,
       loading: isStatsLoading,
     },
     {
       title: "Storage used",
       icon: Layers,
-      value: isStatsError ? "—" : formatBytes(stats?.storageUsedBytes),
+      value: statsUnavailable ? "—" : formatBytes(stats?.storageUsedBytes),
       loading: isStatsLoading,
     },
   ];
@@ -96,6 +107,22 @@ export default function DashboardPage() {
   }
 
   function handleContinue(data: { title: string; source: MeetingSourceId }) {
+    if (isGuest) {
+      const now = new Date().toISOString();
+      const meeting: Meeting = {
+        id: crypto.randomUUID(),
+        title: data.title || "Untitled meeting",
+        status: "scheduled",
+        durationSeconds: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      addGuestMeeting(meeting);
+      setNewMeetingOpen(false);
+      router.push(`/meetings/${meeting.id}`);
+      return;
+    }
+
     createMeeting.mutate(
       { title: data.title, source_type: data.source },
       {
@@ -160,7 +187,7 @@ export default function DashboardPage() {
       description: "Capture a meeting straight from your browser",
       icon: MonitorPlay,
       badge: { label: "Live", variant: "secondary" },
-      onClick: () => router.push("/live"),
+      onClick: () => guard("live-meeting", () => router.push("/live")),
     },
     {
       id: "browse-meetings",
@@ -191,13 +218,17 @@ export default function DashboardPage() {
           <StatisticsGrid stats={dashboardStats} />
           <RecentMeetingsSection
             meetings={meetings?.slice(0, 5)}
-            isLoading={isLoading}
+            isLoading={isGuest ? false : isLoading}
             onViewMeeting={handleView}
-            onRenameMeeting={setRenameTarget}
+            onRenameMeeting={(meeting) =>
+              guard("rename-meeting", () => setRenameTarget(meeting))
+            }
             onDownloadMeeting={(meeting) =>
               toast(`Download "${meeting.title}"`)
             }
-            onDeleteMeeting={setDeleteTarget}
+            onDeleteMeeting={(meeting) =>
+              guard("delete-meeting", () => setDeleteTarget(meeting))
+            }
             onViewAll={() => router.push("/meetings")}
           />
           <ProcessingSection />
@@ -224,6 +255,11 @@ export default function DashboardPage() {
         onOpenChange={(open) => !open && setDeleteTarget(null)}
         onConfirm={handleDeleteConfirm}
         isPending={deleteMeeting.isPending}
+      />
+
+      <GuestUpgradeDialog
+        action={pendingAction}
+        onOpenChange={(open) => !open && closeDialog()}
       />
     </PageContainer>
   );
