@@ -14,6 +14,7 @@ export function useUpdateMeeting(id: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
       queryClient.invalidateQueries({ queryKey: ["meetings", id] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
     },
   });
 }

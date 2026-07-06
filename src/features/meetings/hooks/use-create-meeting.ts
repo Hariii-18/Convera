@@ -11,6 +11,7 @@ export function useCreateMeeting() {
     mutationFn: meetingsApi.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
     },
   });
 }

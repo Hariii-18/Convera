@@ -11,6 +11,7 @@ export function useDeleteMeeting() {
     mutationFn: (id: string) => meetingsApi.remove(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
     },
   });
 }

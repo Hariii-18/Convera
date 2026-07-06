@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.meeting import Meeting
@@ -53,3 +54,13 @@ def update_meeting(db: Session, meeting: Meeting, meeting_in: MeetingUpdate) -> 
 def soft_delete_meeting(db: Session, meeting: Meeting) -> None:
     meeting.deleted_at = datetime.now(timezone.utc)
     db.commit()
+
+
+def get_meeting_status_counts(db: Session, user_id: int) -> dict[str, int]:
+    rows = (
+        db.query(Meeting.status, func.count(Meeting.id))
+        .filter(Meeting.user_id == user_id, Meeting.deleted_at.is_(None))
+        .group_by(Meeting.status)
+        .all()
+    )
+    return dict(rows)

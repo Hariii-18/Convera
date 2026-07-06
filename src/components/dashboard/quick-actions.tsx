@@ -108,7 +108,10 @@ function QuickActionCard({
         <div className="flex items-center gap-2">
           <p className="text-sm font-medium text-foreground">{title}</p>
           {badgeConfig && (
-            <Badge variant={badgeConfig.variant ?? "secondary"} className="shrink-0">
+            <Badge
+              variant={badgeConfig.variant ?? "secondary"}
+              className="shrink-0"
+            >
               {badgeConfig.label}
             </Badge>
           )}
@@ -153,5 +156,5 @@ function QuickActions({
   );
 }
 
-export { QuickActions, QuickActionCard, defaultQuickActions };
+export { QuickActions, QuickActionCard };
 export type { QuickActionCardProps, QuickActionsProps };

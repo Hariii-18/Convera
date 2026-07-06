@@ -5,6 +5,7 @@ import {
   Radio,
   Search,
   Settings,
+  UploadCloud,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -20,6 +21,7 @@ export type NavItem = {
 export const navItems: NavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Meetings", href: "/meetings", icon: CalendarDays },
+  { label: "Uploads", href: "/uploads", icon: UploadCloud },
   { label: "Live Meeting", href: "/live", icon: Radio },
   { label: "Downloads", href: "/downloads", icon: Download },
   { label: "Search", href: "/search", icon: Search },
