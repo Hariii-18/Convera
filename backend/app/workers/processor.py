@@ -1,32 +1,36 @@
-"""Simulated processing steps.
+"""Real transcription pipeline steps: download -> extract audio -> load model -> transcribe.
 
-This module stands in for the real audio pipeline (Whisper transcription,
-GPT summarization, timeline generation, etc.) that will replace it in a
-later sprint. Nothing here touches the database — it only simulates work
-and reports progress so `processing_service` can persist it.
+Each step wraps a blocking call (network I/O, audio decoding, model inference)
+in `asyncio.to_thread` so it doesn't block the event loop the rest of the API
+runs on. Only depends on `app.services.transcription`'s provider-agnostic
+interface, so switching `TRANSCRIPTION_PROVIDER` never touches this module.
 """
 
 import asyncio
-from collections.abc import AsyncIterator
 
-PREPARATION_DELAY_SECONDS = 1.0
+import numpy as np
 
-# (stage label, progress percentage once the step completes, simulated delay)
-SIMULATED_STEPS: list[tuple[str, int, float]] = [
-    ("Analyzing audio", 25, 1.0),
-    ("Extracting content", 50, 1.0),
-    ("Generating output", 75, 1.0),
-    ("Finalizing", 100, 1.0),
-]
+from app.models.upload import Upload
+from app.services.storage_service import download_file
+from app.services.transcription.audio import extract_audio
+from app.services.transcription.base import TranscriptionProvider, TranscriptionResult
+from app.services.transcription.factory import get_transcription_provider
 
 
-async def run_preparation() -> None:
-    """Simulates pre-processing setup (file validation, resource allocation)."""
-    await asyncio.sleep(PREPARATION_DELAY_SECONDS)
+async def download_upload(upload: Upload) -> bytes:
+    """Downloads the source media file from storage."""
+    return await asyncio.to_thread(download_file, upload.storage_path, bucket=upload.bucket)
 
 
-async def run_processing_steps() -> AsyncIterator[tuple[str, int]]:
-    """Simulates the processing stages, yielding (stage label, progress) as each completes."""
-    for label, progress, delay in SIMULATED_STEPS:
-        await asyncio.sleep(delay)
-        yield label, progress
+async def extract_audio_track(file_bytes: bytes) -> tuple[np.ndarray, float]:
+    """Decodes the audio track (from an audio or video file) into a waveform."""
+    return await asyncio.to_thread(extract_audio, file_bytes)
+
+
+async def load_provider() -> TranscriptionProvider:
+    """Loads (or reuses, if already warm) the configured transcription provider."""
+    return await asyncio.to_thread(get_transcription_provider)
+
+
+async def transcribe(provider: TranscriptionProvider, waveform: np.ndarray) -> TranscriptionResult:
+    return await asyncio.to_thread(provider.transcribe, waveform)

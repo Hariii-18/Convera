@@ -12,3 +12,6 @@ pyjwt==2.13.0
 python-dotenv==1.2.1
 supabase==2.31.0
 python-multipart==0.0.20
+faster-whisper==1.2.1
+av==18.0.0
+numpy==2.5.1

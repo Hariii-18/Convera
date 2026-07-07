@@ -22,6 +22,14 @@ class Settings(BaseSettings):
 
     max_upload_size_mb: int = 500
 
+    # Selects the `TranscriptionProvider` implementation from
+    # `app.services.transcription.factory`. Adding a new provider (OpenAI,
+    # Deepgram, AssemblyAI, ...) only means adding a module + a branch there.
+    transcription_provider: str = "faster_whisper"
+    whisper_model_size: str = "base"
+    whisper_device: str = "cpu"
+    whisper_compute_type: str = "int8"
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

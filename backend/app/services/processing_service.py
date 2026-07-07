@@ -1,5 +1,6 @@
 import logging
 import uuid
+from dataclasses import asdict
 
 from fastapi import status
 from sqlalchemy.orm import Session
@@ -15,13 +16,19 @@ from app.crud.processing_job import (
     reset_job_for_retry,
     update_job_progress,
 )
+from app.crud.transcript import upsert_transcript
 from app.crud.upload import get_upload
 from app.db.session import SessionLocal
 from app.models.processing_job import ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.meeting import MeetingUpdate
-from app.workers.processor import run_preparation, run_processing_steps
+from app.workers.processor import (
+    download_upload,
+    extract_audio_track,
+    load_provider,
+    transcribe,
+)
 
 logger = logging.getLogger("converra")
 
@@ -61,7 +68,10 @@ def retry_processing_job(db: Session, job: ProcessingJob) -> ProcessingJob:
 
 
 async def execute_processing_job(job_id: uuid.UUID) -> None:
-    """Runs one ProcessingJob through Preparing -> Processing -> Completed/Failed.
+    """Runs one ProcessingJob through the real transcription pipeline:
+
+        Preparing -> Extract Audio -> Load Model -> Transcribing
+        -> Saving Transcript -> Completed/Failed
 
     Invoked via FastAPI `BackgroundTasks` after the response has already been
     sent, so it opens its own DB session rather than reusing the request's.
@@ -75,30 +85,57 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             return
 
         upload = get_upload(db, job.upload_id, job.user_id)
-        worker_name = f"sim-worker-{job.id.hex[:8]}"
+        if upload is None:
+            raise AppError("Upload not found", status.HTTP_404_NOT_FOUND)
+
+        worker_name = f"whisper-worker-{job.id.hex[:8]}"
         job = mark_job_started(db, job, worker_name=worker_name)
 
-        await run_preparation()
+        file_bytes = await download_upload(upload)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
-        job = update_job_progress(db, job, status="processing", stage="Processing", progress=10)
+        job = update_job_progress(db, job, status="processing", stage="Extracting audio", progress=20)
 
-        async for label, progress in run_processing_steps():
-            job = get_processing_job_by_id(db, job_id)
-            if job is None:
-                return
-            job = update_job_progress(db, job, status="processing", stage=label, progress=progress)
+        waveform, _duration_seconds = await extract_audio_track(file_bytes)
+
+        job = get_processing_job_by_id(db, job_id)
+        if job is None:
+            return
+        job = update_job_progress(db, job, status="processing", stage="Loading model", progress=35)
+
+        provider = await load_provider()
+
+        job = get_processing_job_by_id(db, job_id)
+        if job is None:
+            return
+        job = update_job_progress(db, job, status="processing", stage="Transcribing", progress=45)
+
+        result = await transcribe(provider, waveform)
+
+        job = get_processing_job_by_id(db, job_id)
+        if job is None:
+            return
+        job = update_job_progress(db, job, status="processing", stage="Saving transcript", progress=90)
+
+        upsert_transcript(
+            db,
+            meeting_id=job.meeting_id,
+            upload_id=job.upload_id,
+            language=result.language,
+            transcript=result.text,
+            segments=[asdict(segment) for segment in result.segments],
+            duration=result.duration,
+            word_count=result.word_count,
+        )
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
         mark_job_completed(db, job)
         _sync_meeting_status(db, job.meeting_id, job.user_id, "completed")
-        logger.info(
-            "Processing job %s completed for upload %s", job.id, upload.id if upload else job.upload_id
-        )
+        logger.info("Processing job %s completed for upload %s", job.id, upload.id)
     except Exception as exc:  # noqa: BLE001 (worker failure must never crash the task loop)
         logger.exception("Processing job %s failed", job_id, exc_info=exc)
         job = get_processing_job_by_id(db, job_id)

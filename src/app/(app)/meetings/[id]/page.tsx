@@ -30,6 +30,7 @@ import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
+import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
@@ -56,6 +57,15 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const { data: processingJob, isLoading: isProcessingJobLoading } =
     useProcessingJob(id, { enabled: isReady && !isGuest });
+
+  const {
+    data: transcript,
+    isLoading: isTranscriptLoading,
+    isError: isTranscriptError,
+  } = useTranscript(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
 
   const activity = useMemo<ActivityItem[]>(() => {
     if (!meeting) return [];
@@ -102,9 +112,20 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const [transcriptSearch, setTranscriptSearch] = useState("");
   const [transcriptEditMode, setTranscriptEditMode] = useState(false);
-  const [transcriptBlocks, setTranscriptBlocks] = useState<
-    TranscriptBlockData[]
-  >([]);
+  // Edits are local-only (no persistence endpoint yet); reset whenever the
+  // fetched transcript changes so a fresh/retried result isn't shadowed by
+  // stale edits made against the previous one.
+  const [editedBlocks, setEditedBlocks] = useState<TranscriptBlockData[] | null>(
+    null,
+  );
+  const [lastTranscriptId, setLastTranscriptId] = useState<string | undefined>(
+    transcript?.id,
+  );
+  if (transcript?.id !== lastTranscriptId) {
+    setLastTranscriptId(transcript?.id);
+    setEditedBlocks(null);
+  }
+  const transcriptBlocks = editedBlocks ?? transcript?.blocks ?? [];
 
   const [actionItems, setActionItems] = useState<ActionItemData[]>([]);
 
@@ -208,19 +229,26 @@ export default function MeetingPage({ params }: MeetingPageProps) {
         {activeTab === "transcript" && (
           <TranscriptViewer
             blocks={transcriptBlocks}
+            isLoading={isGuest ? false : isTranscriptLoading}
             searchValue={transcriptSearch}
             onSearchChange={setTranscriptSearch}
             editMode={transcriptEditMode}
             onEditModeChange={setTranscriptEditMode}
             onBlockTextChange={(blockId, text) =>
-              setTranscriptBlocks((blocks) =>
-                blocks.map((block) =>
+              setEditedBlocks((blocks) =>
+                (blocks ?? transcript?.blocks ?? []).map((block) =>
                   block.id === blockId ? { ...block, text } : block,
                 ),
               )
             }
             onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
             onCopy={() => toast("Transcript copied")}
+            emptyTitle={isTranscriptError ? "Couldn't load transcript" : undefined}
+            emptyDescription={
+              isTranscriptError
+                ? "Something went wrong fetching the transcript. Try refreshing the page."
+                : undefined
+            }
           />
         )}
 
