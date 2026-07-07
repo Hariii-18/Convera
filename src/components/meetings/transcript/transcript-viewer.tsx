@@ -127,18 +127,19 @@ function TranscriptViewer({
           className="max-h-[32rem] divide-y divide-border overflow-y-auto"
         >
           {blocks.map((block) => (
-            <TranscriptBlock
-              key={block.id}
-              block={block}
-              searchTerm={searchValue}
-              editable={editMode}
-              onTimestampClick={onTimestampClick}
-              onTextChange={
-                onBlockTextChange
-                  ? (text) => onBlockTextChange(block.id, text)
-                  : undefined
-              }
-            />
+            <div key={block.id} role="listitem">
+              <TranscriptBlock
+                block={block}
+                searchTerm={searchValue}
+                editable={editMode}
+                onTimestampClick={onTimestampClick}
+                onTextChange={
+                  onBlockTextChange
+                    ? (text) => onBlockTextChange(block.id, text)
+                    : undefined
+                }
+              />
+            </div>
           ))}
         </div>
       )}

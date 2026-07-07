@@ -34,7 +34,6 @@ function TranscriptBlock({
   return (
     <div
       data-slot="transcript-block"
-      role="listitem"
       className={cn("flex gap-3 px-4 py-3", className)}
       {...props}
     >

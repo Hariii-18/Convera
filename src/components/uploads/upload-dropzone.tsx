@@ -52,7 +52,7 @@ const UploadDropzone = React.forwardRef<UploadDropzoneHandle, UploadDropzoneProp
       data-slot="upload-dropzone"
       role="button"
       tabIndex={disabled ? -1 : 0}
-      aria-disabled={disabled ? true : undefined}
+      aria-disabled={disabled ? "true" : "false"}
       aria-label="Upload a recording. Drag and drop a file here, or activate to browse your files."
       className={cn(
         "flex flex-col items-center justify-center gap-3 rounded-xl border-2 border-dashed border-border px-6 py-12 text-center transition-colors outline-none",
