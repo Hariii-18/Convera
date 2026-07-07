@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { processingApi } from "@/features/processing/api";
@@ -25,16 +25,20 @@ export function useProcessingJob(
   options?: { enabled?: boolean },
 ) {
   const lastStatusRef = useRef<ProcessingJobStatus | undefined>(undefined);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: ["processing", "meeting", meetingId],
     queryFn: () => processingApi.list(meetingId),
-    select: (data) => (data.length > 0 ? toProcessingJob(data[0]) : null),
+    select: (data) => {
+      const [latest] = data;
+      return latest ? toProcessingJob(latest) : null;
+    },
     enabled: Boolean(meetingId) && (options?.enabled ?? true),
     refetchInterval: (activeQuery) => {
-      const jobs = activeQuery.state.data;
-      if (!jobs || jobs.length === 0) return false;
-      return isTerminalStatus(jobs[0].status) ? false : POLL_INTERVAL_MS;
+      const [latest] = activeQuery.state.data ?? [];
+      if (!latest) return false;
+      return isTerminalStatus(latest.status) ? false : POLL_INTERVAL_MS;
     },
   });
 
@@ -49,7 +53,15 @@ export function useProcessingJob(
     if (toastInfo.variant === "success") toast.success(toastInfo.message);
     else if (toastInfo.variant === "error") toast.error(toastInfo.message);
     else toast(toastInfo.message);
-  }, [query.data]);
+
+    if (isTerminalStatus(job.status)) {
+      // The meeting's own status (shown in the workspace header/badge) tracks
+      // this job's terminal state server-side — refresh it so the badge
+      // doesn't sit on a stale "Processing" after this job finishes.
+      queryClient.invalidateQueries({ queryKey: ["meetings", meetingId] });
+      queryClient.invalidateQueries({ queryKey: ["meetings"] });
+    }
+  }, [query.data, queryClient, meetingId]);
 
   return query;
 }

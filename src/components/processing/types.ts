@@ -7,6 +7,7 @@ export type ProcessingStage =
   | "queued"
   | "uploading"
   | "preparing"
+  | "processing"
   | "chunking"
   | "transcribing"
   | "summarizing"

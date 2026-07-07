@@ -46,6 +46,9 @@ export type TimelineEventPreview = {
 
 export type ActivityEventType =
   | "processing-completed"
+  | "processing-started"
+  | "processing-failed"
+  | "queued"
   | "transcript-edited"
   | "summary-generated"
   | "recording-uploaded"

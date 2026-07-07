@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { SearchX } from "lucide-react";
 import { toast } from "sonner";
@@ -24,10 +24,12 @@ import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog
 import type { Meeting } from "@/components/meetings/types";
 import type { ActionItemData } from "@/components/meetings/summary/types";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
+import type { ActivityItem } from "@/components/meetings/overview/types";
 import { extractErrorMessage } from "@/features/auth/error";
 import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
+import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
@@ -51,6 +53,48 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   const meeting = isGuest ? guestMeeting : fetchedMeeting;
   const updateMeeting = useUpdateMeeting(id);
   const deleteMeeting = useDeleteMeeting();
+
+  const { data: processingJob, isLoading: isProcessingJobLoading } =
+    useProcessingJob(id, { enabled: isReady && !isGuest });
+
+  const activity = useMemo<ActivityItem[]>(() => {
+    if (!meeting) return [];
+
+    const items: ActivityItem[] = [
+      { id: "meeting-created", type: "meeting-created", timestamp: meeting.createdAt },
+    ];
+
+    if (processingJob) {
+      items.push({
+        id: "recording-uploaded",
+        type: "recording-uploaded",
+        timestamp: processingJob.createdAt,
+      });
+      items.push({
+        id: "queued",
+        type: "queued",
+        timestamp: processingJob.createdAt,
+      });
+      if (processingJob.startedAt) {
+        items.push({
+          id: "processing-started",
+          type: "processing-started",
+          timestamp: processingJob.startedAt,
+        });
+      }
+      if (processingJob.completedAt) {
+        items.push({
+          id: processingJob.status === "failed" ? "processing-failed" : "processing-completed",
+          type: processingJob.status === "failed" ? "processing-failed" : "processing-completed",
+          timestamp: processingJob.completedAt,
+        });
+      }
+    }
+
+    return items.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [meeting, processingJob]);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTabValue>("overview");
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
@@ -152,6 +196,9 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               createdAt: meeting.createdAt,
               updatedAt: meeting.updatedAt,
             }}
+            activity={activity}
+            processingJob={isGuest ? null : processingJob}
+            processingJobLoading={isGuest ? false : isProcessingJobLoading}
             onViewFullSummary={() => setActiveTab("summary")}
             onViewTimeline={() => setActiveTab("timeline")}
             onDownloadRecording={() => toast("Download recording")}

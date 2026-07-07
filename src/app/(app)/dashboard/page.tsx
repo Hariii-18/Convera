@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity,
   CalendarPlus,
   CheckCircle2,
+  Clock,
   FolderOpen,
   Layers,
   MonitorPlay,
@@ -28,11 +29,14 @@ import {
 import { RecentMeetingsSection } from "@/components/dashboard/recent-meetings-section";
 import { ProcessingSection } from "@/components/dashboard/processing-section";
 import { DashboardSidebar } from "@/components/dashboard/dashboard-sidebar";
+import { RecentActivity } from "@/components/meetings/overview/recent-activity";
 import { PageContainer } from "@/components/layout/page-container";
 import { Button } from "@/components/ui/button";
 import { NewMeetingModal } from "@/components/meetings/new-meeting-modal";
 import type { MeetingSourceId } from "@/components/meetings/meeting-source";
 import type { Meeting } from "@/components/meetings/types";
+import type { ActivityItem } from "@/components/meetings/overview/types";
+import type { ProcessingQueueItem } from "@/components/processing/types";
 import { formatBytes } from "@/components/meetings/format";
 import { extractErrorMessage } from "@/features/auth/error";
 import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
@@ -40,14 +44,29 @@ import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
+import { useProcessing } from "@/features/processing/hooks/use-processing";
+import { isTerminalStatus } from "@/features/processing/mappers";
 import { RenameMeetingDialog } from "@/components/meetings/rename-meeting-dialog";
 import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
 
+const CLOCK_TICK_MS = 1000;
+
+/** Ticks once a second so the processing queue's "elapsed" readouts stay live between polls. */
+function useNow() {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
 export default function DashboardPage() {
   const router = useRouter();
+  const now = useNow();
   const { isGuest, isReady, pendingAction, guard, closeDialog } =
     useGuestGate();
   const guestMeetings = useGuestMeetingsStore((state) => state.meetings);
@@ -69,6 +88,10 @@ export default function DashboardPage() {
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
 
+  const { data: processingJobs, isLoading: isProcessingLoading } = useProcessing({
+    enabled: isReady && !isGuest,
+  });
+
   const statsUnavailable = isStatsError || isGuest;
   const dashboardStats: StatItem[] = [
     {
@@ -78,21 +101,27 @@ export default function DashboardPage() {
       loading: isStatsLoading,
     },
     {
-      title: "Processing",
+      title: "Currently processing",
       icon: Activity,
-      value: statsUnavailable ? "—" : stats?.processingMeetings,
+      value: statsUnavailable ? "—" : stats?.currentlyProcessing,
       loading: isStatsLoading,
     },
     {
-      title: "Completed",
+      title: "Queued jobs",
+      icon: Clock,
+      value: statsUnavailable ? "—" : stats?.queuedJobs,
+      loading: isStatsLoading,
+    },
+    {
+      title: "Completed today",
       icon: CheckCircle2,
-      value: statsUnavailable ? "—" : stats?.completedMeetings,
+      value: statsUnavailable ? "—" : stats?.completedToday,
       loading: isStatsLoading,
     },
     {
-      title: "Failed",
+      title: "Failed jobs",
       icon: XCircle,
-      value: statsUnavailable ? "—" : stats?.failedMeetings,
+      value: statsUnavailable ? "—" : stats?.failedJobs,
       loading: isStatsLoading,
     },
     {
@@ -102,6 +131,61 @@ export default function DashboardPage() {
       loading: isStatsLoading,
     },
   ];
+
+  const meetingTitleById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const meeting of meetings ?? []) map.set(meeting.id, meeting.title);
+    return map;
+  }, [meetings]);
+
+  const processingQueueItems: ProcessingQueueItem[] = useMemo(() => {
+    return (processingJobs ?? [])
+      .filter((job) => !isTerminalStatus(job.status))
+      .map((job) => {
+        const startMs = new Date(job.startedAt ?? job.createdAt).getTime();
+        return {
+          id: job.id,
+          title: meetingTitleById.get(job.meetingId) ?? "Untitled meeting",
+          stage: job.status,
+          percentage: job.status === "queued" ? undefined : job.progress,
+          elapsedSeconds: Math.max(0, Math.floor((now - startMs) / 1000)),
+          currentOperation: job.stage,
+        };
+      });
+  }, [processingJobs, meetingTitleById, now]);
+
+  const recentActivity: ActivityItem[] = useMemo(() => {
+    const items: ActivityItem[] = [];
+    for (const job of processingJobs ?? []) {
+      const title = meetingTitleById.get(job.meetingId) ?? "Untitled meeting";
+      items.push({
+        id: `${job.id}-queued`,
+        type: "queued",
+        timestamp: job.createdAt,
+        description: `Queued "${title}" for processing`,
+      });
+      if (job.startedAt) {
+        items.push({
+          id: `${job.id}-started`,
+          type: "processing-started",
+          timestamp: job.startedAt,
+          description: `Started processing "${title}"`,
+        });
+      }
+      if (job.completedAt) {
+        const failed = job.status === "failed";
+        items.push({
+          id: `${job.id}-${failed ? "failed" : "completed"}`,
+          type: failed ? "processing-failed" : "processing-completed",
+          timestamp: job.completedAt,
+          description: `${failed ? "Failed" : "Finished"} processing "${title}"`,
+        });
+      }
+    }
+    return items.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
+  }, [processingJobs, meetingTitleById]);
 
   function handleView(meeting: Meeting) {
     router.push(`/meetings/${meeting.id}`);
@@ -232,10 +316,17 @@ export default function DashboardPage() {
             }
             onViewAll={() => router.push("/meetings")}
           />
-          <ProcessingSection />
+          <ProcessingSection
+            items={isGuest ? [] : processingQueueItems}
+            isLoading={isGuest ? false : isProcessingLoading}
+          />
         </div>
 
-        <DashboardSidebar />
+        <DashboardSidebar>
+          {isGuest ? undefined : (
+            <RecentActivity items={recentActivity} loading={isProcessingLoading} />
+          )}
+        </DashboardSidebar>
       </div>
 
       <NewMeetingModal

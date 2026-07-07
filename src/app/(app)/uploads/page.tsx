@@ -59,6 +59,7 @@ export default function UploadsPage() {
         onSuccess: (upload) => {
           toast.success(`"${file.name}" uploaded successfully`);
           if (upload.meetingId) {
+            toast("Queued for processing");
             router.push(`/meetings/${upload.meetingId}`);
           }
         },

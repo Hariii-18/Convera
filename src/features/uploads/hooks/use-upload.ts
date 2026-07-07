@@ -53,6 +53,7 @@ export function useUpload() {
       queryClient.invalidateQueries({ queryKey: ["uploads"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      queryClient.invalidateQueries({ queryKey: ["processing"] });
     },
     onSettled: () => {
       controllerRef.current = null;

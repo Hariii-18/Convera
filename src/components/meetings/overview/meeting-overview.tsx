@@ -3,6 +3,7 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 import { MeetingMetadata } from "@/components/meetings/overview/meeting-metadata";
 import { MeetingStatistics } from "@/components/meetings/overview/meeting-statistics";
+import { ProcessingStatusCard } from "@/components/meetings/overview/processing-status-card";
 import { RecordingCard } from "@/components/meetings/overview/recording-card";
 import { SummaryPreview } from "@/components/meetings/overview/summary-preview";
 import { TimelinePreview } from "@/components/meetings/overview/timeline-preview";
@@ -14,6 +15,7 @@ import type {
   RecordingInfo,
   TimelineEventPreview,
 } from "@/components/meetings/overview/types";
+import type { ProcessingJob } from "@/features/processing/mappers";
 
 type MeetingOverviewProps = React.ComponentProps<"div"> & {
   metadata?: MeetingMetadataData;
@@ -23,6 +25,9 @@ type MeetingOverviewProps = React.ComponentProps<"div"> & {
   summary?: string;
   timelineEvents?: TimelineEventPreview[];
   activity?: ActivityItem[];
+  /** This meeting's live processing job, if any. `undefined` while loading, `null` once loaded with none. */
+  processingJob?: ProcessingJob | null;
+  processingJobLoading?: boolean;
   /** Renders every section's skeleton state. */
   loading?: boolean;
   onViewFullSummary?: () => void;
@@ -45,6 +50,8 @@ function MeetingOverview({
   summary,
   timelineEvents,
   activity,
+  processingJob,
+  processingJobLoading = false,
   loading = false,
   onViewFullSummary,
   onViewTimeline,
@@ -73,6 +80,10 @@ function MeetingOverview({
 
       <div className="flex flex-col gap-6">
         <MeetingMetadata data={metadata} loading={loading} />
+        <ProcessingStatusCard
+          job={processingJob}
+          loading={loading || processingJobLoading}
+        />
         <RecordingCard
           recording={recording}
           loading={loading}

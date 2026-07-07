@@ -2,10 +2,11 @@ import type { DashboardStatsResponse } from "@/features/dashboard/types";
 
 export type DashboardStats = {
   totalMeetings: number;
-  completedMeetings: number;
-  processingMeetings: number;
-  failedMeetings: number;
   storageUsedBytes: number;
+  currentlyProcessing: number;
+  queuedJobs: number;
+  completedToday: number;
+  failedJobs: number;
 };
 
 export function toDashboardStats(
@@ -13,9 +14,10 @@ export function toDashboardStats(
 ): DashboardStats {
   return {
     totalMeetings: response.total_meetings,
-    completedMeetings: response.completed_meetings,
-    processingMeetings: response.processing_meetings,
-    failedMeetings: response.failed_meetings,
     storageUsedBytes: response.storage_used_bytes,
+    currentlyProcessing: response.currently_processing,
+    queuedJobs: response.queued_jobs,
+    completedToday: response.completed_today,
+    failedJobs: response.failed_jobs,
   };
 }
