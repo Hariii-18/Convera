@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { Logo } from "@/components/shared/logo";
 import { ThemeToggle } from "@/components/shared/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { MobileNav } from "@/components/layout/mobile-nav";
 import { marketingNavItems } from "@/components/layout/marketing-nav-config";
 import { cn } from "@/lib/utils";
@@ -39,17 +39,19 @@ export function Header() {
         </nav>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="hidden sm:inline-flex"
-            render={<Link href="/login" />}
+          <Link
+            href="/login"
+            className={buttonVariants({
+              variant: "ghost",
+              size: "sm",
+              className: "hidden sm:inline-flex",
+            })}
           >
             Sign in
-          </Button>
-          <Button size="sm" render={<Link href="/register" />}>
+          </Link>
+          <Link href="/register" className={buttonVariants({ size: "sm" })}>
             Get started
-          </Button>
+          </Link>
           <ThemeToggle />
           <MobileNav />
         </div>

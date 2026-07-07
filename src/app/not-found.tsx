@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Compass } from "lucide-react";
 
 import { PageContainer } from "@/components/layout/page-container";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 
 export default function NotFound() {
@@ -13,9 +13,9 @@ export default function NotFound() {
         title="Page not found"
         description="The page you're looking for doesn't exist or may have moved."
         action={
-          <Button size="sm" render={<Link href="/dashboard" />}>
+          <Link href="/dashboard" className={buttonVariants({ size: "sm" })}>
             Back to dashboard
-          </Button>
+          </Link>
         }
       />
     </PageContainer>

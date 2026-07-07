@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     supabase_service_role_key: str
     supabase_storage_bucket: str = "converra-files"
 
+    max_upload_size_mb: int = 500
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 logger = logging.getLogger("converra")
 
@@ -21,6 +22,29 @@ def _error_response(status_code: int, message: str, details: object = None) -> J
         status_code=status_code,
         content={"error": {"message": message, "details": details}},
     )
+
+
+class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
+    """Catches unhandled exceptions inside the middleware stack (below CORSMiddleware).
+
+    Starlette moves any handler registered for the bare `Exception` class onto
+    `ServerErrorMiddleware`, which sits *outside* every `app.add_middleware(...)` layer
+    (including CORS). Left alone, that means any unhandled exception produces a 500
+    response with no `Access-Control-Allow-Origin` header, and browsers report it as a
+    CORS failure instead of the real error. Catching it here — inside CORSMiddleware —
+    ensures error responses still carry CORS headers. Register this middleware before
+    `CORSMiddleware` so it ends up as the inner layer.
+    """
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint):
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001  (last-resort safety net)
+            logger.exception("Unhandled exception", exc_info=exc)
+            return _error_response(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "Internal server error",
+            )
 
 
 def register_exception_handlers(app: FastAPI) -> None:

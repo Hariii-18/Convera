@@ -48,19 +48,20 @@ import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { isGuest, pendingAction, guard, closeDialog } = useGuestGate();
+  const { isGuest, isReady, pendingAction, guard, closeDialog } =
+    useGuestGate();
   const guestMeetings = useGuestMeetingsStore((state) => state.meetings);
   const addGuestMeeting = useGuestMeetingsStore((state) => state.addMeeting);
 
   const { data: fetchedMeetings, isLoading } = useMeetings({
-    enabled: !isGuest,
+    enabled: isReady && !isGuest,
   });
   const meetings = isGuest ? guestMeetings : fetchedMeetings;
   const {
     data: stats,
     isLoading: isStatsLoading,
     isError: isStatsError,
-  } = useDashboardStats({ enabled: !isGuest });
+  } = useDashboardStats({ enabled: isReady && !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);

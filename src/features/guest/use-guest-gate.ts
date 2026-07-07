@@ -11,7 +11,7 @@ import type { GuestRestrictedAction } from "@/features/guest/permissions";
  * instead of the action ever running.
  */
 export function useGuestGate() {
-  const { isGuest } = useGuestSession();
+  const { isGuest, isReady } = useGuestSession();
   const [pendingAction, setPendingAction] =
     useState<GuestRestrictedAction | null>(null);
 
@@ -28,5 +28,5 @@ export function useGuestGate() {
 
   const closeDialog = useCallback(() => setPendingAction(null), []);
 
-  return { isGuest, pendingAction, guard, closeDialog };
+  return { isGuest, isReady, pendingAction, guard, closeDialog };
 }

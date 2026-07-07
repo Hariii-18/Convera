@@ -3,11 +3,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import get_settings
-from app.core.exceptions import register_exception_handlers
+from app.core.exceptions import UnhandledExceptionMiddleware, register_exception_handlers
 
 settings = get_settings()
 
 app = FastAPI(title="Converra API", version="0.1.0")
+
+# Registered before CORSMiddleware so it sits *inside* it (add_middleware makes the
+# most-recently-added middleware outermost) — this way error responses it produces
+# still pass through CORSMiddleware and get CORS headers. See UnhandledExceptionMiddleware.
+app.add_middleware(UnhandledExceptionMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

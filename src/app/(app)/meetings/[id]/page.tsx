@@ -39,14 +39,15 @@ type MeetingPageProps = {
 export default function MeetingPage({ params }: MeetingPageProps) {
   const { id } = use(params);
   const router = useRouter();
-  const { isGuest, pendingAction, guard, closeDialog } = useGuestGate();
+  const { isGuest, isReady, pendingAction, guard, closeDialog } =
+    useGuestGate();
   const guestMeeting = useGuestMeetingsStore((state) => state.getMeeting(id));
 
   const {
     data: fetchedMeeting,
     isLoading,
     isError,
-  } = useMeeting(id, { enabled: !isGuest });
+  } = useMeeting(id, { enabled: isReady && !isGuest });
   const meeting = isGuest ? guestMeeting : fetchedMeeting;
   const updateMeeting = useUpdateMeeting(id);
   const deleteMeeting = useDeleteMeeting();
@@ -95,7 +96,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     });
   }
 
-  if (isLoading) {
+  if (!isReady || isLoading) {
     return <MeetingWorkspaceSkeleton />;
   }
 

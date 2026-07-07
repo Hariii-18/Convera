@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { PageContainer } from "@/components/layout/page-container";
 import { DashboardPreview } from "@/components/marketing/dashboard-preview";
 
@@ -26,13 +26,16 @@ function Hero() {
         </div>
 
         <div className="flex flex-col items-center gap-3 sm:flex-row">
-          <Button size="lg" render={<Link href="/dashboard" />}>
+          <Link href="/dashboard" className={buttonVariants({ size: "lg" })}>
             Try without account
             <ArrowRight data-icon="inline-end" />
-          </Button>
-          <Button variant="outline" size="lg" render={<Link href="/register" />}>
+          </Link>
+          <Link
+            href="/register"
+            className={buttonVariants({ variant: "outline", size: "lg" })}
+          >
             Create account
-          </Button>
+          </Link>
         </div>
       </div>
 

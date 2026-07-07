@@ -30,7 +30,7 @@ import { useGuestSession } from "@/features/guest/guest-provider";
 
 export default function MeetingsPage() {
   const router = useRouter();
-  const { isGuest } = useGuestSession();
+  const { isGuest, isReady } = useGuestSession();
   const [search, setSearch] = useState("");
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
@@ -42,7 +42,7 @@ export default function MeetingsPage() {
     isError,
     error,
     refetch,
-  } = useMeetings({ enabled: !isGuest });
+  } = useMeetings({ enabled: isReady && !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
