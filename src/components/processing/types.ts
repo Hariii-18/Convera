@@ -4,6 +4,7 @@
  */
 
 export type ProcessingStage =
+  | "queued"
   | "uploading"
   | "preparing"
   | "chunking"

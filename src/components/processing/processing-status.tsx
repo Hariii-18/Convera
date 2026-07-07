@@ -13,6 +13,14 @@ function ProcessingStatus({
 }) {
   const status = getProcessingStatus(stage);
 
+  if (status === "queued") {
+    return (
+      <StatusBadge status="neutral" className={className}>
+        Queued
+      </StatusBadge>
+    );
+  }
+
   if (status === "processing") {
     return (
       <StatusBadge status="info" dot={false} className={className}>

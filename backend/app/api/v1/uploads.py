@@ -1,7 +1,7 @@
 import logging
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -21,6 +21,7 @@ from app.db.session import get_db
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.upload import UploadRead
+from app.services.processing_service import queue_processing_job
 from app.services.storage_service import StorageError, delete_file, upload_file
 from app.services.upload_validation import (
     build_storage_path,
@@ -28,6 +29,7 @@ from app.services.upload_validation import (
     get_validated_extension,
     sanitize_filename,
 )
+from app.workers.processing_worker import run_processing_job
 
 logger = logging.getLogger("converra")
 
@@ -44,6 +46,7 @@ def _get_owned_upload(db: Session, upload_id: uuid.UUID, current_user: User) -> 
 @router.post("", response_model=UploadRead, status_code=status.HTTP_201_CREATED)
 async def create(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     meeting_id: uuid.UUID | None = Form(None),
     db: Session = Depends(get_db),
@@ -106,7 +109,18 @@ async def create(
         mark_upload_failed(db, upload)
         raise AppError("Failed to upload file to storage", status.HTTP_502_BAD_GATEWAY) from exc
 
-    return mark_upload_completed(db, upload)
+    upload = mark_upload_completed(db, upload)
+
+    if upload.meeting_id is not None:
+        try:
+            job = queue_processing_job(db, upload=upload, user=current_user)
+            background_tasks.add_task(run_processing_job, job.id)
+        except AppError as exc:
+            # The upload itself succeeded; a failure to queue processing (e.g. the
+            # linked meeting was deleted mid-request) shouldn't fail the response.
+            logger.exception("Failed to queue processing job for upload", exc_info=exc)
+
+    return upload
 
 
 @router.get("", response_model=list[UploadRead])

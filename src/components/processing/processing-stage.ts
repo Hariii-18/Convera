@@ -3,6 +3,7 @@ import {
   Captions,
   CircleCheck,
   CircleX,
+  Clock,
   PackageCheck,
   Settings2,
   Sparkles,
@@ -16,6 +17,7 @@ export const processingStageConfig: Record<
   ProcessingStage,
   { label: string; icon: LucideIcon }
 > = {
+  queued: { label: "Queued", icon: Clock },
   uploading: { label: "Uploading", icon: UploadCloud },
   preparing: { label: "Preparing", icon: Settings2 },
   chunking: { label: "Chunking audio", icon: AudioLines },
@@ -30,5 +32,6 @@ export const processingStageConfig: Record<
 export function getProcessingStatus(stage: ProcessingStage) {
   if (stage === "completed") return "completed" as const;
   if (stage === "failed") return "failed" as const;
+  if (stage === "queued") return "queued" as const;
   return "processing" as const;
 }
