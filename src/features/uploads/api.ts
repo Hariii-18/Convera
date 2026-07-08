@@ -4,7 +4,7 @@ import { apiClient } from "@/lib/api-client";
 import type { UploadResponse } from "@/features/uploads/types";
 
 type UploadFileOptions = {
-  meetingId?: string;
+  meetingId: string;
   signal?: AbortSignal;
   onUploadProgress?: (event: AxiosProgressEvent) => void;
 };
@@ -22,13 +22,11 @@ export const uploadsApi = {
 
   async upload(
     file: File,
-    options?: UploadFileOptions,
+    options: UploadFileOptions,
   ): Promise<UploadResponse> {
     const formData = new FormData();
     formData.append("file", file);
-    if (options?.meetingId) {
-      formData.append("meeting_id", options.meetingId);
-    }
+    formData.append("meeting_id", options.meetingId);
 
     const { data } = await apiClient.post<UploadResponse>(
       "/uploads",

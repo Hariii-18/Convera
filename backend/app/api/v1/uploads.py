@@ -48,7 +48,7 @@ async def create(
     request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    meeting_id: uuid.UUID | None = Form(None),
+    meeting_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Upload:
@@ -62,7 +62,7 @@ async def create(
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
         )
 
-    if meeting_id is not None and get_meeting(db, meeting_id, current_user.id) is None:
+    if get_meeting(db, meeting_id, current_user.id) is None:
         raise AppError("Meeting not found", status.HTTP_404_NOT_FOUND)
 
     original_filename = sanitize_filename(file.filename or "upload")
@@ -111,14 +111,13 @@ async def create(
 
     upload = mark_upload_completed(db, upload)
 
-    if upload.meeting_id is not None:
-        try:
-            job = queue_processing_job(db, upload=upload, user=current_user)
-            background_tasks.add_task(run_processing_job, job.id)
-        except AppError as exc:
-            # The upload itself succeeded; a failure to queue processing (e.g. the
-            # linked meeting was deleted mid-request) shouldn't fail the response.
-            logger.exception("Failed to queue processing job for upload", exc_info=exc)
+    try:
+        job = queue_processing_job(db, upload=upload, user=current_user)
+        background_tasks.add_task(run_processing_job, job.id)
+    except AppError as exc:
+        # The upload itself succeeded; a failure to queue processing (e.g. the
+        # linked meeting was deleted mid-request) shouldn't fail the response.
+        logger.exception("Failed to queue processing job for upload", exc_info=exc)
 
     return upload
 

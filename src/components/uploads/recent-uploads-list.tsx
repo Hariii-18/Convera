@@ -125,7 +125,7 @@ function RecentUploadsList({
                 </div>
               </TableCell>
               <TableCell className="max-w-48 truncate text-muted-foreground">
-                {meeting ? meeting.title : upload.meetingId ? "—" : "Not linked"}
+                {meeting ? meeting.title : "—"}
               </TableCell>
               <TableCell className="w-px whitespace-nowrap">
                 <UploadStatusBadge status={upload.status} />

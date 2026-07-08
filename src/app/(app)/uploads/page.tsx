@@ -1,8 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import axios from "axios";
 import { AlertTriangle, History, UploadCloud } from "lucide-react";
 import { toast } from "sonner";
 
@@ -11,37 +10,27 @@ import { SectionHeader } from "@/components/layout/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import {
-  ActiveUploadCard,
-  type ActiveUploadStatus,
-} from "@/components/uploads/active-upload-card";
 import { DeleteUploadDialog } from "@/components/uploads/delete-upload-dialog";
 import { RecentUploadsList } from "@/components/uploads/recent-uploads-list";
-import {
-  UploadDropzone,
-  type UploadDropzoneHandle,
-} from "@/components/uploads/upload-dropzone";
+import { StartUploadDialog } from "@/components/uploads/start-upload-dialog";
+import { UploadDialog } from "@/components/uploads/upload-dialog";
 import { extractErrorMessage } from "@/features/auth/error";
 import { useGuestSession } from "@/features/guest/guest-provider";
 import { useDeleteUpload } from "@/features/uploads/hooks/use-delete-upload";
-import { UploadValidationError, useUpload } from "@/features/uploads/hooks/use-upload";
 import { useUploads } from "@/features/uploads/hooks/use-uploads";
 import type { Upload } from "@/features/uploads/mappers";
+import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { toMeeting } from "@/features/meetings/mappers";
 import type { Meeting } from "@/components/meetings/types";
-
-function getUploadErrorMessage(error: unknown): string {
-  if (error instanceof UploadValidationError) return error.message;
-  return extractErrorMessage(error);
-}
 
 export default function UploadsPage() {
   const router = useRouter();
   const { isGuest, isReady } = useGuestSession();
 
-  const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Upload | null>(null);
-  const dropzoneRef = useRef<UploadDropzoneHandle>(null);
+  const [startDialogOpen, setStartDialogOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
 
   const {
     data: uploads,
@@ -51,7 +40,7 @@ export default function UploadsPage() {
     refetch,
   } = useUploads({ enabled: isReady && !isGuest });
   const { data: meetings } = useMeetings({ enabled: isReady && !isGuest });
-  const uploadMutation = useUpload();
+  const createMeeting = useCreateMeeting();
   const deleteMutation = useDeleteUpload();
 
   const meetingsById = useMemo(() => {
@@ -60,39 +49,35 @@ export default function UploadsPage() {
     return map;
   }, [meetings]);
 
+  const linkedUploads = useMemo(
+    () => (uploads ?? []).filter((upload) => upload.meetingId),
+    [uploads],
+  );
+
   function handleViewUpload(upload: Upload) {
     if (upload.meetingId) router.push(`/meetings/${upload.meetingId}`);
   }
 
-  function handleFileSelected(file: File) {
-    setCurrentFile(file);
-    uploadMutation.mutate(
-      { file },
+  function handleSelectExisting(meetingId: string) {
+    const meeting = meetingsById.get(meetingId);
+    if (!meeting) return;
+    setStartDialogOpen(false);
+    setUploadTarget(meeting);
+  }
+
+  function handleCreateNew(title: string) {
+    createMeeting.mutate(
+      { title, source_type: "upload-recording" },
       {
-        onSuccess: (upload) => {
-          toast.success(`"${file.name}" uploaded successfully`);
-          if (upload.meetingId) {
-            toast("Queued for processing");
-            router.push(`/meetings/${upload.meetingId}`);
-          }
+        onSuccess: (meeting) => {
+          setStartDialogOpen(false);
+          setUploadTarget(toMeeting(meeting));
         },
         onError: (mutationError) => {
-          if (axios.isCancel(mutationError)) return;
-          toast.error(getUploadErrorMessage(mutationError));
+          toast.error(extractErrorMessage(mutationError));
         },
       },
     );
-  }
-
-  function handleCancel() {
-    uploadMutation.cancel();
-    setCurrentFile(null);
-    uploadMutation.reset();
-  }
-
-  function handleRemove() {
-    setCurrentFile(null);
-    uploadMutation.reset();
   }
 
   function handleDeleteConfirm() {
@@ -130,14 +115,6 @@ export default function UploadsPage() {
     );
   }
 
-  const activeStatus: ActiveUploadStatus | null = !currentFile
-    ? null
-    : uploadMutation.isError
-      ? "error"
-      : uploadMutation.isSuccess
-        ? "success"
-        : "uploading";
-
   return (
     <PageContainer className="flex flex-col gap-6">
       <SectionHeader
@@ -145,50 +122,12 @@ export default function UploadsPage() {
         title="Uploads"
         description="Upload an existing recording to have it processed."
         action={
-          <Button size="sm" onClick={() => dropzoneRef.current?.open()}>
+          <Button size="sm" onClick={() => setStartDialogOpen(true)}>
             <UploadCloud data-icon="inline-start" />
             Upload recording
           </Button>
         }
       />
-
-      <Card>
-        <CardContent className="flex flex-col gap-4">
-          <UploadDropzone
-            ref={dropzoneRef}
-            onFileSelected={handleFileSelected}
-            disabled={uploadMutation.isPending}
-          />
-
-          <div aria-live="polite" className="sr-only">
-            {activeStatus === "uploading" &&
-              `Uploading ${currentFile?.name}, ${uploadMutation.progress} percent`}
-            {activeStatus === "success" && `${currentFile?.name} uploaded successfully`}
-            {activeStatus === "error" &&
-              `Upload failed: ${getUploadErrorMessage(uploadMutation.error)}`}
-          </div>
-
-          {currentFile && activeStatus && (
-            <ActiveUploadCard
-              file={currentFile}
-              status={activeStatus}
-              progress={uploadMutation.progress}
-              errorMessage={
-                activeStatus === "error"
-                  ? getUploadErrorMessage(uploadMutation.error)
-                  : undefined
-              }
-              onCancel={activeStatus === "uploading" ? handleCancel : undefined}
-              onRetry={
-                activeStatus === "error"
-                  ? () => handleFileSelected(currentFile)
-                  : undefined
-              }
-              onRemove={activeStatus !== "uploading" ? handleRemove : undefined}
-            />
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader className="border-b pb-4">
@@ -209,7 +148,7 @@ export default function UploadsPage() {
             />
           ) : (
             <RecentUploadsList
-              uploads={uploads ?? []}
+              uploads={linkedUploads}
               meetingsById={meetingsById}
               isLoading={isLoading}
               onView={handleViewUpload}
@@ -218,6 +157,24 @@ export default function UploadsPage() {
           )}
         </CardContent>
       </Card>
+
+      <StartUploadDialog
+        open={startDialogOpen}
+        onOpenChange={setStartDialogOpen}
+        meetings={meetings ?? []}
+        isCreatingMeeting={createMeeting.isPending}
+        onSelectExisting={handleSelectExisting}
+        onCreateNew={handleCreateNew}
+      />
+
+      {uploadTarget && (
+        <UploadDialog
+          open={Boolean(uploadTarget)}
+          onOpenChange={(open) => !open && setUploadTarget(null)}
+          meetingId={uploadTarget.id}
+          meetingTitle={uploadTarget.title}
+        />
+      )}
 
       <DeleteUploadDialog
         upload={deleteTarget}

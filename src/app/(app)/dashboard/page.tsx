@@ -33,12 +33,15 @@ import { RecentActivity } from "@/components/meetings/overview/recent-activity";
 import { PageContainer } from "@/components/layout/page-container";
 import { Button } from "@/components/ui/button";
 import { NewMeetingModal } from "@/components/meetings/new-meeting-modal";
+import { UploadDialog } from "@/components/uploads/upload-dialog";
 import type { MeetingSourceId } from "@/components/meetings/meeting-source";
 import type { Meeting } from "@/components/meetings/types";
 import type { ActivityItem } from "@/components/meetings/overview/types";
 import type { ProcessingQueueItem } from "@/components/processing/types";
 import { formatBytes } from "@/components/meetings/format";
 import { extractErrorMessage } from "@/features/auth/error";
+import { getPostCreateRoute } from "@/features/meetings/navigation";
+import { toMeeting } from "@/features/meetings/mappers";
 import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
@@ -84,6 +87,7 @@ export default function DashboardPage() {
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
@@ -213,7 +217,11 @@ export default function DashboardPage() {
       {
         onSuccess: (meeting) => {
           setNewMeetingOpen(false);
-          router.push(`/meetings/${meeting.id}`);
+          if (data.source === "upload-recording") {
+            setUploadTarget(toMeeting(meeting));
+            return;
+          }
+          router.push(getPostCreateRoute(data.source, meeting.id));
         },
         onError: (mutationError) => {
           toast.error(extractErrorMessage(mutationError));
@@ -334,6 +342,15 @@ export default function DashboardPage() {
         onOpenChange={setNewMeetingOpen}
         onContinue={handleContinue}
       />
+
+      {uploadTarget && (
+        <UploadDialog
+          open={Boolean(uploadTarget)}
+          onOpenChange={(open) => !open && setUploadTarget(null)}
+          meetingId={uploadTarget.id}
+          meetingTitle={uploadTarget.title}
+        />
+      )}
 
       <RenameMeetingDialog
         meeting={renameTarget}

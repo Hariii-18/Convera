@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { Controller, useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -14,6 +16,10 @@ import {
 import { MeetingSourceSelector } from "@/components/meetings/meeting-source-selector";
 import { MeetingTitleInput } from "@/components/meetings/meeting-title-input";
 import type { MeetingSourceId } from "@/components/meetings/meeting-source";
+import {
+  newMeetingSchema,
+  type NewMeetingFormValues,
+} from "@/features/meetings/schemas";
 
 type NewMeetingModalProps = {
   open: boolean;
@@ -65,17 +71,37 @@ type NewMeetingFormProps = {
 };
 
 function NewMeetingForm({ onContinue }: NewMeetingFormProps) {
-  const [title, setTitle] = React.useState("");
-  const [source, setSource] = React.useState<MeetingSourceId | undefined>(
-    undefined,
-  );
+  const {
+    control,
+    handleSubmit,
+    formState: { errors },
+  } = useForm<NewMeetingFormValues>({
+    resolver: zodResolver(newMeetingSchema),
+    defaultValues: { title: "", source: undefined },
+  });
 
-  const canContinue = Boolean(source);
+  function onSubmit(values: NewMeetingFormValues) {
+    onContinue?.({
+      title: values.title,
+      source: values.source as MeetingSourceId,
+    });
+  }
 
   return (
-    <>
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
       <div className="flex flex-col gap-5">
-        <MeetingTitleInput value={title} onChange={setTitle} autoFocus />
+        <Controller
+          control={control}
+          name="title"
+          render={({ field }) => (
+            <MeetingTitleInput
+              value={field.value}
+              onChange={field.onChange}
+              error={errors.title?.message}
+              autoFocus
+            />
+          )}
+        />
 
         <div className="flex flex-col gap-2">
           <span
@@ -84,26 +110,31 @@ function NewMeetingForm({ onContinue }: NewMeetingFormProps) {
           >
             Meeting source
           </span>
-          <MeetingSourceSelector
-            value={source}
-            onChange={setSource}
-            aria-labelledby="new-meeting-source-label"
+          <Controller
+            control={control}
+            name="source"
+            render={({ field }) => (
+              <MeetingSourceSelector
+                value={field.value as MeetingSourceId | undefined}
+                onChange={field.onChange}
+                aria-labelledby="new-meeting-source-label"
+              />
+            )}
           />
+          {errors.source && (
+            <p className="text-xs text-destructive">
+              {errors.source.message}
+            </p>
+          )}
         </div>
       </div>
 
       <DialogFooter>
-        <Button
-          className="w-full sm:w-auto"
-          disabled={!canContinue}
-          onClick={() =>
-            source && onContinue?.({ title: title.trim(), source })
-          }
-        >
+        <Button type="submit" className="w-full sm:w-auto">
           Continue
         </Button>
       </DialogFooter>
-    </>
+    </form>
   );
 }
 

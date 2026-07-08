@@ -9,6 +9,7 @@ import { PageContainer } from "@/components/layout/page-container";
 import { SectionHeader } from "@/components/layout/section-header";
 import { MeetingsTable } from "@/components/meetings/meetings-table";
 import { NewMeetingModal } from "@/components/meetings/new-meeting-modal";
+import { UploadDialog } from "@/components/uploads/upload-dialog";
 import type { MeetingSourceId } from "@/components/meetings/meeting-source";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -23,6 +24,8 @@ import {
   defaultMeetingFilters,
 } from "@/components/meetings/filters/types";
 import { extractErrorMessage } from "@/features/auth/error";
+import { getPostCreateRoute } from "@/features/meetings/navigation";
+import { toMeeting } from "@/features/meetings/mappers";
 import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
@@ -36,6 +39,7 @@ export default function MeetingsPage() {
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState(defaultMeetingFilters);
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
+  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
 
@@ -97,7 +101,11 @@ export default function MeetingsPage() {
       {
         onSuccess: (meeting) => {
           setNewMeetingOpen(false);
-          router.push(`/meetings/${meeting.id}`);
+          if (data.source === "upload-recording") {
+            setUploadTarget(toMeeting(meeting));
+            return;
+          }
+          router.push(getPostCreateRoute(data.source, meeting.id));
         },
         onError: (mutationError) => {
           toast.error(extractErrorMessage(mutationError));
@@ -187,6 +195,15 @@ export default function MeetingsPage() {
         onOpenChange={setNewMeetingOpen}
         onContinue={handleContinue}
       />
+
+      {uploadTarget && (
+        <UploadDialog
+          open={Boolean(uploadTarget)}
+          onOpenChange={(open) => !open && setUploadTarget(null)}
+          meetingId={uploadTarget.id}
+          meetingTitle={uploadTarget.title}
+        />
+      )}
 
       <RenameMeetingDialog
         meeting={renameTarget}

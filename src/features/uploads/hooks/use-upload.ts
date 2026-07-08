@@ -12,7 +12,7 @@ import {
 
 export class UploadValidationError extends Error {}
 
-type UploadInput = { file: File; meetingId?: string };
+type UploadInput = { file: File; meetingId: string };
 
 /**
  * Drives a single in-flight upload: client-side pre-validation, the actual
