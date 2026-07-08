@@ -6,6 +6,7 @@ export function toMeeting(response: MeetingResponse): Meeting {
     id: response.id,
     title: response.title,
     status: response.status,
+    sourceType: response.source_type,
     durationSeconds: response.duration_seconds,
     createdAt: response.created_at,
     updatedAt: response.updated_at,

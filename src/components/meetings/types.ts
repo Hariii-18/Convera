@@ -1,3 +1,5 @@
+import type { MeetingSourceId } from "@/components/meetings/meeting-source";
+
 /**
  * Domain types for the meetings feature. Shared by MeetingsTable and any
  * future consumer (Dashboard, Meetings page) so they stay in sync.
@@ -15,4 +17,6 @@ export type Meeting = {
   updatedAt: string | Date;
   /** Optional participant count, shown as a secondary line under the title. */
   participantCount?: number;
+  /** How the recording behind this meeting was captured. Absent for guest/local-only meetings. */
+  sourceType?: MeetingSourceId;
 };

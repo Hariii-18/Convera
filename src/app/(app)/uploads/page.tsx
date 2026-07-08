@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import axios from "axios";
 import { AlertTriangle, History, UploadCloud } from "lucide-react";
@@ -27,6 +27,8 @@ import { useDeleteUpload } from "@/features/uploads/hooks/use-delete-upload";
 import { UploadValidationError, useUpload } from "@/features/uploads/hooks/use-upload";
 import { useUploads } from "@/features/uploads/hooks/use-uploads";
 import type { Upload } from "@/features/uploads/mappers";
+import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import type { Meeting } from "@/components/meetings/types";
 
 function getUploadErrorMessage(error: unknown): string {
   if (error instanceof UploadValidationError) return error.message;
@@ -48,8 +50,19 @@ export default function UploadsPage() {
     error,
     refetch,
   } = useUploads({ enabled: isReady && !isGuest });
+  const { data: meetings } = useMeetings({ enabled: isReady && !isGuest });
   const uploadMutation = useUpload();
   const deleteMutation = useDeleteUpload();
+
+  const meetingsById = useMemo(() => {
+    const map = new Map<string, Meeting>();
+    for (const meeting of meetings ?? []) map.set(meeting.id, meeting);
+    return map;
+  }, [meetings]);
+
+  function handleViewUpload(upload: Upload) {
+    if (upload.meetingId) router.push(`/meetings/${upload.meetingId}`);
+  }
 
   function handleFileSelected(file: File) {
     setCurrentFile(file);
@@ -197,7 +210,9 @@ export default function UploadsPage() {
           ) : (
             <RecentUploadsList
               uploads={uploads ?? []}
+              meetingsById={meetingsById}
               isLoading={isLoading}
+              onView={handleViewUpload}
               onDelete={setDeleteTarget}
             />
           )}
