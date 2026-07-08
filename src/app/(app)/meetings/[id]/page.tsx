@@ -31,6 +31,8 @@ import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
+import { useSummary } from "@/features/summaries/hooks/use-summary";
+import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
@@ -66,6 +68,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
+
+  const {
+    data: summary,
+    isLoading: isSummaryLoading,
+  } = useSummary(id, { enabled: isReady && !isGuest });
+  const regenerateSummary = useRegenerateSummary(id);
 
   const activity = useMemo<ActivityItem[]>(() => {
     if (!meeting) return [];
@@ -127,7 +135,20 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   }
   const transcriptBlocks = editedBlocks ?? transcript?.blocks ?? [];
 
-  const [actionItems, setActionItems] = useState<ActionItemData[]>([]);
+  // Action item completion toggles are local-only (no persistence endpoint
+  // yet); reset whenever a fresh/regenerated summary comes in so stale
+  // toggles from the previous summary don't shadow it.
+  const [editedActionItems, setEditedActionItems] = useState<
+    ActionItemData[] | null
+  >(null);
+  const [lastSummaryId, setLastSummaryId] = useState<string | undefined>(
+    summary?.id,
+  );
+  if (summary?.id !== lastSummaryId) {
+    setLastSummaryId(summary?.id);
+    setEditedActionItems(null);
+  }
+  const actionItems = editedActionItems ?? summary?.actionItems ?? [];
 
   const [timelineSearch, setTimelineSearch] = useState("");
   const [timelineExpanded, setTimelineExpanded] = useState(false);
@@ -254,11 +275,20 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
         {activeTab === "summary" && (
           <SummaryViewer
+            executiveSummary={summary?.executiveSummary}
+            topics={summary?.topics}
+            decisions={summary?.decisions}
             actionItems={actionItems}
-            onToggleActionItem={(id) =>
-              setActionItems((items) =>
-                items.map((item) =>
-                  item.id === id
+            risks={summary?.risks}
+            openQuestions={summary?.openQuestions}
+            nextSteps={summary?.nextSteps}
+            loading={
+              isGuest ? false : isSummaryLoading || regenerateSummary.isPending
+            }
+            onToggleActionItem={(itemId) =>
+              setEditedActionItems(
+                actionItems.map((item) =>
+                  item.id === itemId
                     ? {
                         ...item,
                         status:
@@ -272,7 +302,15 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             }
             onCopy={() => toast("Summary copied")}
             onExport={() => toast("Export summary")}
-            onRegenerate={() => toast("Regenerate summary")}
+            onRegenerate={() =>
+              guard("manage-meeting", () =>
+                regenerateSummary.mutate(undefined, {
+                  onSuccess: () => toast.success("Summary regenerated"),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                }),
+              )
+            }
           />
         )}
 

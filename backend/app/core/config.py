@@ -30,6 +30,14 @@ class Settings(BaseSettings):
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
 
+    # Selects the `AIProvider` implementation from `app.services.ai.factory`.
+    # Only "ollama" is implemented; "openai", "gemini", "claude" are reserved
+    # names for future providers.
+    ai_provider: str = "ollama"
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3.1"
+    ollama_request_timeout_seconds: float = 120.0
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
