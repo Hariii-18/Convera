@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { ChevronsUpDown, LogOut, Settings, User } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -14,19 +15,8 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useLogout } from "@/features/auth/hooks/use-logout";
+import { initialsFor } from "@/lib/utils";
 import { useAuthStore } from "@/store/auth-store";
-
-function initialsFor(name: string) {
-  return (
-    name
-      .split(" ")
-      .filter(Boolean)
-      .map((part) => part[0])
-      .slice(0, 2)
-      .join("")
-      .toUpperCase() || "U"
-  );
-}
 
 export function UserNav() {
   const user = useAuthStore((state) => state.user);
@@ -65,11 +55,11 @@ export function UserNav() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem>
+          <DropdownMenuItem render={<Link href="/profile" />}>
             <User />
             Profile
           </DropdownMenuItem>
-          <DropdownMenuItem>
+          <DropdownMenuItem render={<Link href="/settings" />}>
             <Settings />
             Settings
           </DropdownMenuItem>

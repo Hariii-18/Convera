@@ -1,6 +1,7 @@
 import axios from "axios";
 
 import { clearAccessTokenCookie, getAccessTokenCookie } from "@/lib/cookies";
+import { useAuthStore } from "@/store/auth-store";
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
@@ -23,6 +24,7 @@ apiClient.interceptors.response.use(
   (error) => {
     if (axios.isAxiosError(error) && error.response?.status === 401) {
       clearAccessTokenCookie();
+      useAuthStore.getState().clearUser();
     }
     return Promise.reject(error);
   },

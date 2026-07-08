@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import axios from "axios";
 
 import { useCurrentUserQuery } from "@/features/auth/hooks/use-current-user";
 import { clearAccessTokenCookie, getAccessTokenCookie } from "@/lib/cookies";
@@ -18,18 +19,23 @@ export function SessionProvider() {
   const clearUser = useAuthStore((state) => state.clearUser);
 
   const hasToken = isHydrated && Boolean(getAccessTokenCookie());
-  const { data, isError } = useCurrentUserQuery(hasToken);
+  const { data, error } = useCurrentUserQuery(hasToken);
 
   useEffect(() => {
     if (data) setUser(data);
   }, [data, setUser]);
 
   useEffect(() => {
-    if (isError) {
+    // Only a confirmed 401 (invalid/expired token) should sign the user out.
+    // Any other failure (network blip, transient 5xx) leaves the existing
+    // session in place rather than logging the user out from underneath them.
+    const isUnauthorized =
+      axios.isAxiosError(error) && error.response?.status === 401;
+    if (isUnauthorized) {
       clearAccessTokenCookie();
       clearUser();
     }
-  }, [isError, clearUser]);
+  }, [error, clearUser]);
 
   return null;
 }

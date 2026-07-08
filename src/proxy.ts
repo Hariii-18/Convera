@@ -15,7 +15,13 @@ const AUTH_ROUTES = ["/login", "/register", "/forgot-password"];
  * account (Guest Mode) — they branch their own data source client-side
  * instead of being gated here. See `src/features/guest/`.
  */
-const PROTECTED_PREFIXES = ["/live", "/downloads", "/search", "/settings"];
+const PROTECTED_PREFIXES = [
+  "/live",
+  "/downloads",
+  "/search",
+  "/settings",
+  "/profile",
+];
 
 function isProtectedPath(pathname: string) {
   return PROTECTED_PREFIXES.some(
@@ -54,6 +60,7 @@ export const config = {
     "/downloads/:path*",
     "/search/:path*",
     "/settings/:path*",
+    "/profile/:path*",
     "/login",
     "/register",
     "/forgot-password",

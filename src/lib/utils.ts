@@ -12,3 +12,16 @@ export function cn(...inputs: ClassValue[]) {
  */
 export const hoverLiftClass =
   "transition-all duration-200 ease-out hover:-translate-y-0.5 hover:shadow-md hover:ring-foreground/20 motion-reduce:transition-none motion-reduce:hover:translate-y-0";
+
+/** Up to two uppercase initials from a display name, e.g. "Jane Doe" -> "JD". */
+export function initialsFor(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .map((part) => part[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "U"
+  );
+}
