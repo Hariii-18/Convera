@@ -19,6 +19,7 @@ import { formatDateTime } from "@/components/meetings/format";
 import { cn } from "@/lib/utils";
 import type { ProcessingStage } from "@/components/processing/types";
 import type { ProcessingJob } from "@/features/processing/mappers";
+import { isTerminalStatus } from "@/features/processing/mappers";
 
 type ProcessingJobsTableProps = React.ComponentProps<"div"> & {
   jobs: ProcessingJob[];
@@ -29,6 +30,8 @@ type ProcessingJobsTableProps = React.ComponentProps<"div"> & {
   now: number;
   onRetry?: (job: ProcessingJob) => void;
   isRetrying?: (job: ProcessingJob) => boolean;
+  onCancel?: (job: ProcessingJob) => void;
+  isCancelling?: (job: ProcessingJob) => boolean;
   onViewMeeting?: (meetingId: string) => void;
 };
 
@@ -74,6 +77,8 @@ function ProcessingJobsTable({
   now,
   onRetry,
   isRetrying,
+  onCancel,
+  isCancelling,
   onViewMeeting,
   className,
   ...props
@@ -160,7 +165,12 @@ function ProcessingJobsTable({
                       <RotateCw data-icon="inline-start" />
                       Retry
                     </Button>
-                    <Button variant="ghost" size="sm" disabled title="Cancel isn't available yet">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => onCancel?.(job)}
+                      disabled={isTerminalStatus(job.status) || isCancelling?.(job)}
+                    >
                       Cancel
                     </Button>
                   </div>

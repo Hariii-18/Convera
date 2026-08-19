@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -64,58 +65,64 @@ function MeetingFiltersMenu({ filters, onChange }: MeetingFiltersMenuProps) {
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="w-72">
-        <DropdownMenuLabel>Status</DropdownMenuLabel>
-        {statusOptions.map((status) => (
-          <DropdownMenuCheckboxItem
-            key={status}
-            checked={filters.statuses.includes(status)}
-            onCheckedChange={(checked) => toggleStatus(status, checked)}
-          >
-            {meetingStatusConfig[status].label}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Status</DropdownMenuLabel>
+          {statusOptions.map((status) => (
+            <DropdownMenuCheckboxItem
+              key={status}
+              checked={filters.statuses.includes(status)}
+              onCheckedChange={(checked) => toggleStatus(status, checked)}
+            >
+              {meetingStatusConfig[status].label}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuLabel>Upload type</DropdownMenuLabel>
-        {meetingSourceOptions.map((source) => (
-          <DropdownMenuCheckboxItem
-            key={source.id}
-            checked={filters.sourceTypes.includes(source.id)}
-            onCheckedChange={(checked) => toggleSourceType(source.id, checked)}
-          >
-            {source.title}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Upload type</DropdownMenuLabel>
+          {meetingSourceOptions.map((source) => (
+            <DropdownMenuCheckboxItem
+              key={source.id}
+              checked={filters.sourceTypes.includes(source.id)}
+              onCheckedChange={(checked) => toggleSourceType(source.id, checked)}
+            >
+              {source.title}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
 
         <DropdownMenuSeparator />
 
-        <DropdownMenuLabel>Date range</DropdownMenuLabel>
-        <div className="flex items-center gap-2 px-1.5 py-1">
-          <Input
-            type="date"
-            aria-label="From date"
-            value={filters.dateFrom ?? ""}
-            max={filters.dateTo ?? undefined}
-            onChange={(event) =>
-              onChange({ ...filters, dateFrom: event.target.value || null })
-            }
-            onClick={(event) => event.stopPropagation()}
-            className="h-8"
-          />
-          <span className="text-xs text-muted-foreground">to</span>
-          <Input
-            type="date"
-            aria-label="To date"
-            value={filters.dateTo ?? ""}
-            min={filters.dateFrom ?? undefined}
-            onChange={(event) =>
-              onChange({ ...filters, dateTo: event.target.value || null })
-            }
-            onClick={(event) => event.stopPropagation()}
-            className="h-8"
-          />
-        </div>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Date range</DropdownMenuLabel>
+          <div className="flex items-center gap-2 px-1.5 py-1">
+            <Input
+              type="date"
+              aria-label="From date"
+              value={filters.dateFrom ?? ""}
+              max={filters.dateTo ?? undefined}
+              onChange={(event) =>
+                onChange({ ...filters, dateFrom: event.target.value || null })
+              }
+              onClick={(event) => event.stopPropagation()}
+              className="h-8"
+            />
+            <span className="text-xs text-muted-foreground">to</span>
+            <Input
+              type="date"
+              aria-label="To date"
+              value={filters.dateTo ?? ""}
+              min={filters.dateFrom ?? undefined}
+              onChange={(event) =>
+                onChange({ ...filters, dateTo: event.target.value || null })
+              }
+              onClick={(event) => event.stopPropagation()}
+              className="h-8"
+            />
+          </div>
+        </DropdownMenuGroup>
 
         {activeCount > 0 && (
           <>
