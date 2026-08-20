@@ -1,4 +1,5 @@
 import logging
+import time
 import uuid
 from dataclasses import asdict
 
@@ -91,34 +92,54 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
         worker_name = f"whisper-worker-{job.id.hex[:8]}"
         job = mark_job_started(db, job, worker_name=worker_name)
 
+        logger.info("[timing] job %s download_upload start", job_id)
+        t0 = time.perf_counter()
         file_bytes = await download_upload(upload)
+        logger.info(
+            "[timing] job %s download_upload end elapsed=%.3fs bytes=%d",
+            job_id, time.perf_counter() - t0, len(file_bytes),
+        )
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
         job = update_job_progress(db, job, status="processing", stage="Extracting audio", progress=20)
 
+        logger.info("[timing] job %s extract_audio start", job_id)
+        t0 = time.perf_counter()
         waveform, _duration_seconds = await extract_audio_track(file_bytes)
+        logger.info(
+            "[timing] job %s extract_audio end elapsed=%.3fs samples=%d duration=%.3fs",
+            job_id, time.perf_counter() - t0, waveform.shape[0], _duration_seconds,
+        )
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
         job = update_job_progress(db, job, status="processing", stage="Loading model", progress=35)
 
+        logger.info("[timing] job %s load_model start", job_id)
+        t0 = time.perf_counter()
         provider = await load_provider()
+        logger.info("[timing] job %s load_model end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
         job = update_job_progress(db, job, status="processing", stage="Transcribing", progress=45)
 
+        logger.info("[timing] job %s transcription start", job_id)
+        t0 = time.perf_counter()
         result = await transcribe(provider, waveform)
+        logger.info("[timing] job %s transcription end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
         job = update_job_progress(db, job, status="processing", stage="Saving transcript", progress=90)
 
+        logger.info("[timing] job %s save_transcript start", job_id)
+        t0 = time.perf_counter()
         upsert_transcript(
             db,
             meeting_id=job.meeting_id,
@@ -129,12 +150,17 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             duration=result.duration,
             word_count=result.word_count,
         )
+        logger.info("[timing] job %s save_transcript end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
+
+        logger.info("[timing] job %s finalization start", job_id)
+        t0 = time.perf_counter()
         mark_job_completed(db, job)
         _sync_meeting_status(db, job.meeting_id, job.user_id, "completed")
+        logger.info("[timing] job %s finalization end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         logger.info("Processing job %s completed for upload %s", job.id, upload.id)
     except Exception as exc:  # noqa: BLE001 (worker failure must never crash the task loop)
         logger.exception("Processing job %s failed", job_id, exc_info=exc)

@@ -16,6 +16,8 @@ from app.services.ai.base import (
     ActionItem,
     ActionItemsResult,
     AIProvider,
+    NormalizationResult,
+    NormalizedSegment,
     StructuredSummaryResult,
     SummaryResult,
     SummaryTextItem,
@@ -23,6 +25,8 @@ from app.services.ai.base import (
     TimelineEvent,
     TimelineResult,
     TranscriptChunk,
+    TranscriptTranslationResult,
+    TranslatedSegment,
     TranslationResult,
 )
 
@@ -224,3 +228,92 @@ class OllamaProvider(AIProvider):
             open_questions=_text_items("open_questions"),
             next_steps=_text_items("next_steps"),
         )
+
+    def normalize_transcript(
+        self, segments: list[TranscriptChunk], *, language: str | None = None
+    ) -> NormalizationResult:
+        if not segments:
+            return NormalizationResult(segments=[])
+
+        language_hint = f" The speech may be in {language}." if language else ""
+        indexed = [{"i": i, "text": segment.text} for i, segment in enumerate(segments)]
+        prompt = (
+            "You are cleaning up a raw speech-to-text transcript for readability. "
+            "You will be given a JSON array of segments, each with an index \"i\" and "
+            "raw \"text\". For each segment, fix punctuation, spacing, and obvious "
+            "grammar or readability issues only. Apply a technical term or proper-name "
+            "correction only when you are highly confident it is a mis-transcription "
+            "(e.g. an obvious ASR error), not a rewording choice. Preserve Hindi, "
+            "Telugu, English, and mixed-language speech exactly as spoken — do not "
+            "translate or transliterate. Never add, remove, or reinterpret content, and "
+            "never change meaning. If a segment needs no changes, return it unchanged. "
+            f"Keep the same number of segments, in the same order.{language_hint}\n\n"
+            "Return only a JSON array of objects with keys \"i\" (the original index) "
+            "and \"text\" (the cleaned text). No markdown, no explanation.\n\n"
+            f"Segments:\n{json.dumps(indexed, ensure_ascii=False)}\n\nJSON:"
+        )
+        raw = self._generate(prompt)
+        parsed = self._parse_json_array(raw)
+        if parsed is None:
+            logger.warning("Ollama returned non-JSON normalization response; leaving segments unchanged")
+            return NormalizationResult(segments=[])
+
+        cleaned: list[NormalizedSegment] = []
+        for entry in parsed:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                index = int(entry["i"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            text = str(entry.get("text", "")).strip()
+            if not (0 <= index < len(segments)) or not text:
+                continue
+            cleaned.append(NormalizedSegment(index=index, text=text))
+
+        return NormalizationResult(segments=cleaned)
+
+    def translate_transcript(
+        self,
+        segments: list[TranscriptChunk],
+        *,
+        target_language: str,
+        source_language: str | None = None,
+    ) -> TranscriptTranslationResult:
+        if not segments:
+            return TranscriptTranslationResult(segments=[])
+
+        source_hint = f" from {source_language}" if source_language else ""
+        indexed = [{"i": i, "text": segment.text} for i, segment in enumerate(segments)]
+        prompt = (
+            f"You are translating a speech-to-text transcript{source_hint} into "
+            f"{target_language}. You will be given a JSON array of segments, each with "
+            "an index \"i\" and raw \"text\". Translate each segment's text into "
+            f"{target_language}, preserving meaning and tone as closely as possible. "
+            "Never add, remove, or reinterpret content. If a segment is already in "
+            f"{target_language}, return it unchanged. Keep the same number of "
+            "segments, in the same order.\n\n"
+            "Return only a JSON array of objects with keys \"i\" (the original index) "
+            "and \"text\" (the translated text). No markdown, no explanation.\n\n"
+            f"Segments:\n{json.dumps(indexed, ensure_ascii=False)}\n\nJSON:"
+        )
+        raw = self._generate(prompt)
+        parsed = self._parse_json_array(raw)
+        if parsed is None:
+            logger.warning("Ollama returned non-JSON translation response; leaving segments unchanged")
+            return TranscriptTranslationResult(segments=[])
+
+        translated: list[TranslatedSegment] = []
+        for entry in parsed:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                index = int(entry["i"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            text = str(entry.get("text", "")).strip()
+            if not (0 <= index < len(segments)) or not text:
+                continue
+            translated.append(TranslatedSegment(index=index, text=text))
+
+        return TranscriptTranslationResult(segments=translated)

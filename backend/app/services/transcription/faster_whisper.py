@@ -37,7 +37,7 @@ class FasterWhisperProvider(TranscriptionProvider):
         )
 
     def transcribe(self, audio: np.ndarray, *, sample_rate: int = 16000) -> TranscriptionResult:
-        segments_iter, info = self._model.transcribe(audio, beam_size=5)
+        segments_iter, info = self._model.transcribe(audio, beam_size=1, vad_filter=True)
 
         segments: list[TranscriptSegment] = []
         text_parts: list[str] = []

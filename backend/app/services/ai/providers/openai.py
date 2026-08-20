@@ -8,10 +8,12 @@ from __future__ import annotations
 from app.services.ai.base import (
     ActionItemsResult,
     AIProvider,
+    NormalizationResult,
     StructuredSummaryResult,
     SummaryResult,
     TimelineResult,
     TranscriptChunk,
+    TranscriptTranslationResult,
     TranslationResult,
 )
 
@@ -41,4 +43,18 @@ class OpenAIProvider(AIProvider):
     def generate_structured_summary(
         self, text: str, *, language: str | None = None
     ) -> StructuredSummaryResult:
+        raise NotImplementedError
+
+    def normalize_transcript(
+        self, segments: list[TranscriptChunk], *, language: str | None = None
+    ) -> NormalizationResult:
+        raise NotImplementedError
+
+    def translate_transcript(
+        self,
+        segments: list[TranscriptChunk],
+        *,
+        target_language: str,
+        source_language: str | None = None,
+    ) -> TranscriptTranslationResult:
         raise NotImplementedError

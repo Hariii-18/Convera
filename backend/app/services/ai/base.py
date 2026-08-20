@@ -67,6 +67,38 @@ class SummaryTextItem:
 
 
 @dataclass
+class NormalizedSegment:
+    """One segment's cleaned-up text, keyed back to its position in the raw
+    segment list so the caller can re-attach the original start/end
+    timestamps without trusting the model to echo them back correctly.
+    """
+
+    index: int
+    text: str
+
+
+@dataclass
+class NormalizationResult:
+    segments: list[NormalizedSegment] = field(default_factory=list)
+
+
+@dataclass
+class TranslatedSegment:
+    """One segment's translated text, keyed back to its position in the raw
+    segment list so the caller can re-attach the original start/end
+    timestamps without trusting the model to echo them back correctly.
+    """
+
+    index: int
+    text: str
+
+
+@dataclass
+class TranscriptTranslationResult:
+    segments: list[TranslatedSegment] = field(default_factory=list)
+
+
+@dataclass
 class StructuredSummaryResult:
     """The Local Summary Engine's output: an executive summary plus the six
     section lists rendered by the Summary Viewer (see
@@ -120,5 +152,32 @@ class AIProvider(ABC):
     ) -> StructuredSummaryResult:
         """Produces a sectioned summary (executive summary, discussion topics,
         decisions, action items, risks, open questions, next steps) of `text`.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def normalize_transcript(
+        self, segments: list[TranscriptChunk], *, language: str | None = None
+    ) -> NormalizationResult:
+        """Cleans up punctuation, spacing, and obvious grammar issues in each
+        segment's text for readability, applying conservative technical/proper
+        -name corrections only when context is strong. Must never invent
+        content or change meaning, and must preserve Hindi/Telugu/English and
+        mixed-language speech as spoken. Segment order/count and timestamps
+        are the caller's responsibility to preserve — this returns text only.
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def translate_transcript(
+        self,
+        segments: list[TranscriptChunk],
+        *,
+        target_language: str,
+        source_language: str | None = None,
+    ) -> TranscriptTranslationResult:
+        """Translates each segment's text into `target_language`. Must never
+        invent content or change meaning. Segment order/count and timestamps
+        are the caller's responsibility to preserve — this returns text only.
         """
         raise NotImplementedError

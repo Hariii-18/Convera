@@ -10,6 +10,7 @@ import { TranscriptToolbar } from "@/components/meetings/transcript/transcript-t
 import { TranscriptSkeleton } from "@/components/meetings/transcript/transcript-skeleton";
 import { countWords } from "@/components/meetings/format";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
+import type { TranslationLanguage } from "@/features/transcripts/types";
 
 type TranscriptViewerProps = React.ComponentProps<"div"> & {
   blocks?: TranscriptBlockData[];
@@ -26,6 +27,19 @@ type TranscriptViewerProps = React.ComponentProps<"div"> & {
   emptyTitle?: string;
   emptyDescription?: string;
   skeletonCount?: number;
+  /** Which transcript variant is currently shown. Omit to hide the raw/normalized/translated toggle. */
+  view?: "raw" | "normalized" | "translated";
+  onViewChange?: (view: "raw" | "normalized" | "translated") => void;
+  /** Whether a normalized transcript has been generated for this meeting yet. */
+  hasNormalized?: boolean;
+  isNormalizing?: boolean;
+  onGenerateNormalized?: () => void;
+  /** Whether a translation into `translationLanguage` has been generated yet. */
+  hasTranslated?: boolean;
+  isTranslating?: boolean;
+  translationLanguage?: TranslationLanguage;
+  onTranslationLanguageChange?: (language: TranslationLanguage) => void;
+  onGenerateTranslation?: () => void;
 };
 
 /**
@@ -52,6 +66,16 @@ function TranscriptViewer({
   emptyTitle = "No transcript yet",
   emptyDescription = "Once this meeting is transcribed, the full transcript will appear here.",
   skeletonCount = 6,
+  view,
+  onViewChange,
+  hasNormalized = false,
+  isNormalizing = false,
+  onGenerateNormalized,
+  hasTranslated = false,
+  isTranslating = false,
+  translationLanguage,
+  onTranslationLanguageChange,
+  onGenerateTranslation,
   ...props
 }: TranscriptViewerProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -102,6 +126,16 @@ function TranscriptViewer({
         wordCount={blocks.length > 0 ? wordCount : undefined}
         transcriptText={transcriptText}
         onCopy={onCopy}
+        view={view}
+        onViewChange={onViewChange}
+        hasNormalized={hasNormalized}
+        isNormalizing={isNormalizing}
+        onGenerateNormalized={onGenerateNormalized}
+        hasTranslated={hasTranslated}
+        isTranslating={isTranslating}
+        translationLanguage={translationLanguage}
+        onTranslationLanguageChange={onTranslationLanguageChange}
+        onGenerateTranslation={onGenerateTranslation}
         className="border-b border-border"
       />
 

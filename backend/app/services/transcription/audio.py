@@ -10,9 +10,13 @@ audio file" step are the same code path.
 from __future__ import annotations
 
 import io
+import logging
+import time
 
 import av
 import numpy as np
+
+logger = logging.getLogger("converra")
 
 
 class AudioExtractionError(Exception):
@@ -21,6 +25,8 @@ class AudioExtractionError(Exception):
 
 def extract_audio(file_bytes: bytes, *, sample_rate: int = 16000) -> tuple[np.ndarray, float]:
     """Returns (mono float32 waveform in [-1, 1], duration_seconds)."""
+    logger.info("[timing] extract_audio start")
+    t0 = time.perf_counter()
     try:
         container = av.open(io.BytesIO(file_bytes))
     except Exception as exc:  # noqa: BLE001 (PyAV raises assorted decode errors)
@@ -33,9 +39,11 @@ def extract_audio(file_bytes: bytes, *, sample_rate: int = 16000) -> tuple[np.nd
 
         resampler = av.AudioResampler(format="s16", layout="mono", rate=sample_rate)
         chunks: list[np.ndarray] = []
+        frame_count = 0
 
         try:
             for frame in container.decode(stream):
+                frame_count += 1
                 for resampled in resampler.resample(frame):
                     chunks.append(resampled.to_ndarray())
         except Exception as exc:  # noqa: BLE001 (corrupt/truncated media)
@@ -46,6 +54,10 @@ def extract_audio(file_bytes: bytes, *, sample_rate: int = 16000) -> tuple[np.nd
 
         samples = np.concatenate(chunks, axis=1).flatten().astype(np.float32) / 32768.0
         duration = samples.shape[0] / sample_rate
+        logger.info(
+            "[timing] extract_audio end elapsed=%.3fs frames=%d total_samples=%d duration=%.3fs",
+            time.perf_counter() - t0, frame_count, samples.shape[0], duration,
+        )
         return samples, duration
     finally:
         container.close()

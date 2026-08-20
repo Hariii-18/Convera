@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -51,3 +52,42 @@ def upsert_transcript(
     db.commit()
     db.refresh(record)
     return record
+
+
+def update_normalized_transcript(
+    db: Session,
+    transcript: Transcript,
+    *,
+    normalized_transcript: str,
+    normalized_segments: list[dict],
+) -> Transcript:
+    """Stores the normalized (readability-cleaned) transcript alongside the
+    raw one. The raw `transcript`/`segments` columns are never touched here.
+    """
+    transcript.normalized_transcript = normalized_transcript
+    transcript.normalized_segments = normalized_segments
+    transcript.normalized_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
+def update_translated_transcript(
+    db: Session,
+    transcript: Transcript,
+    *,
+    translated_transcript: str,
+    translated_segments: list[dict],
+    target_language: str,
+) -> Transcript:
+    """Stores the translated transcript alongside the raw one. Only one
+    translated language is cached at a time; translating into a different
+    language overwrites the previously cached translation.
+    """
+    transcript.translated_transcript = translated_transcript
+    transcript.translated_segments = translated_segments
+    transcript.translated_language = target_language
+    transcript.translated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(transcript)
+    return transcript

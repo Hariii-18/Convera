@@ -31,6 +31,9 @@ import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
+import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
+import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
+import type { TranslationLanguage } from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
@@ -68,6 +71,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
+  const normalizeTranscript = useNormalizeTranscript(id);
+  const translateTranscript = useTranslateTranscript(id);
 
   const {
     data: summary,
@@ -120,6 +125,11 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const [transcriptSearch, setTranscriptSearch] = useState("");
   const [transcriptEditMode, setTranscriptEditMode] = useState(false);
+  const [transcriptView, setTranscriptView] = useState<
+    "raw" | "normalized" | "translated"
+  >("raw");
+  const [translationLanguage, setTranslationLanguage] =
+    useState<TranslationLanguage>("en");
   // Edits are local-only (no persistence endpoint yet); reset whenever the
   // fetched transcript changes so a fresh/retried result isn't shadowed by
   // stale edits made against the previous one.
@@ -132,8 +142,19 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   if (transcript?.id !== lastTranscriptId) {
     setLastTranscriptId(transcript?.id);
     setEditedBlocks(null);
+    setTranscriptView("raw");
   }
   const transcriptBlocks = editedBlocks ?? transcript?.blocks ?? [];
+  const hasNormalizedTranscript = Boolean(transcript?.normalizedBlocks);
+  const hasTranslatedTranscript =
+    Boolean(transcript?.translatedBlocks) &&
+    transcript?.translatedLanguage === translationLanguage;
+  const displayedTranscriptBlocks =
+    transcriptView === "normalized"
+      ? (transcript?.normalizedBlocks ?? [])
+      : transcriptView === "translated"
+        ? (transcript?.translatedBlocks ?? [])
+        : transcriptBlocks;
 
   // Action item completion toggles are local-only (no persistence endpoint
   // yet); reset whenever a fresh/regenerated summary comes in so stale
@@ -249,26 +270,69 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
         {activeTab === "transcript" && (
           <TranscriptViewer
-            blocks={transcriptBlocks}
+            blocks={displayedTranscriptBlocks}
             isLoading={isGuest ? false : isTranscriptLoading}
             searchValue={transcriptSearch}
             onSearchChange={setTranscriptSearch}
             editMode={transcriptEditMode}
             onEditModeChange={setTranscriptEditMode}
-            onBlockTextChange={(blockId, text) =>
-              setEditedBlocks((blocks) =>
-                (blocks ?? transcript?.blocks ?? []).map((block) =>
-                  block.id === blockId ? { ...block, text } : block,
-                ),
-              )
+            onBlockTextChange={
+              transcriptView === "normalized" || transcriptView === "translated"
+                ? undefined
+                : (blockId, text) =>
+                    setEditedBlocks((blocks) =>
+                      (blocks ?? transcript?.blocks ?? []).map((block) =>
+                        block.id === blockId ? { ...block, text } : block,
+                      ),
+                    )
             }
             onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
-            onCopy={() => toast("Transcript copied")}
+            onCopy={() =>
+              toast(
+                transcriptView === "normalized"
+                  ? "Normalized transcript copied"
+                  : transcriptView === "translated"
+                    ? "Translated transcript copied"
+                    : "Transcript copied",
+              )
+            }
             emptyTitle={isTranscriptError ? "Couldn't load transcript" : undefined}
             emptyDescription={
               isTranscriptError
                 ? "Something went wrong fetching the transcript. Try refreshing the page."
                 : undefined
+            }
+            view={isGuest ? undefined : transcriptView}
+            onViewChange={setTranscriptView}
+            hasNormalized={hasNormalizedTranscript}
+            isNormalizing={normalizeTranscript.isPending}
+            onGenerateNormalized={() =>
+              guard("manage-meeting", () =>
+                normalizeTranscript.mutate(undefined, {
+                  onSuccess: () => {
+                    setTranscriptView("normalized");
+                    toast.success("Normalized transcript generated");
+                  },
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                }),
+              )
+            }
+            hasTranslated={hasTranslatedTranscript}
+            isTranslating={translateTranscript.isPending}
+            translationLanguage={translationLanguage}
+            onTranslationLanguageChange={setTranslationLanguage}
+            onGenerateTranslation={() =>
+              guard("manage-meeting", () =>
+                translateTranscript.mutate(translationLanguage, {
+                  onSuccess: () => {
+                    setTranscriptView("translated");
+                    toast.success("Translated transcript generated");
+                  },
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                }),
+              )
             }
           />
         )}

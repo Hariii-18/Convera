@@ -19,6 +19,22 @@ export type TranscriptResponse = {
   segments: TranscriptSegmentResponse[];
   duration: number | null;
   word_count: number;
+  normalized_transcript: string | null;
+  normalized_segments: TranscriptSegmentResponse[] | null;
+  normalized_at: string | null;
+  translated_transcript: string | null;
+  translated_segments: TranscriptSegmentResponse[] | null;
+  translated_language: string | null;
+  translated_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+/** Languages the translation layer supports; matches the backend's `TranslationLanguage`. */
+export type TranslationLanguage = "en" | "hi" | "te";
+
+export const TRANSLATION_LANGUAGES: { value: TranslationLanguage; label: string }[] = [
+  { value: "en", label: "English" },
+  { value: "hi", label: "Hindi" },
+  { value: "te", label: "Telugu" },
+];

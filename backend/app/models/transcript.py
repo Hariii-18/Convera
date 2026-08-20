@@ -32,6 +32,13 @@ class Transcript(Base):
     segments: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     duration: Mapped[float | None] = mapped_column(Float, nullable=True)
     word_count: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
+    normalized_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    normalized_segments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    normalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    translated_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    translated_segments: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    translated_language: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    translated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
