@@ -29,10 +29,23 @@ export type Transcript = {
   translatedAt: string | null;
 };
 
+/**
+ * Segment timestamps are an enhancement, not a precondition for having a
+ * transcript: a 200 response can carry full `transcript` text with an empty
+ * `segments` array (e.g. no segment-level timing was produced). Falling back
+ * to a single untimed block keeps that text visible instead of the viewer
+ * treating a valid response as "no transcript yet".
+ */
 function toBlocks(
   transcriptId: string,
   segments: TranscriptSegmentResponse[],
+  fallbackText: string,
 ): TranscriptBlockData[] {
+  if (segments.length === 0) {
+    return fallbackText.trim().length > 0
+      ? [{ id: `${transcriptId}-0`, timestampSeconds: 0, text: fallbackText }]
+      : [];
+  }
   return segments.map((segment, index) => ({
     id: `${transcriptId}-${index}`,
     timestampSeconds: Math.round(segment.start),
@@ -51,15 +64,15 @@ export function toTranscript(response: TranscriptResponse): Transcript {
     wordCount: response.word_count,
     createdAt: response.created_at,
     updatedAt: response.updated_at,
-    blocks: toBlocks(response.id, response.segments),
+    blocks: toBlocks(response.id, response.segments, response.transcript),
     normalizedText: response.normalized_transcript,
     normalizedBlocks: response.normalized_segments
-      ? toBlocks(response.id, response.normalized_segments)
+      ? toBlocks(response.id, response.normalized_segments, response.normalized_transcript ?? "")
       : null,
     normalizedAt: response.normalized_at,
     translatedText: response.translated_transcript,
     translatedBlocks: response.translated_segments
-      ? toBlocks(response.id, response.translated_segments)
+      ? toBlocks(response.id, response.translated_segments, response.translated_transcript ?? "")
       : null,
     translatedLanguage: response.translated_language,
     translatedAt: response.translated_at,

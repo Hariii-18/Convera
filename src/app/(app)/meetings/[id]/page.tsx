@@ -33,6 +33,7 @@ import { useProcessingJob } from "@/features/processing/hooks/use-processing-job
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
+import { TRANSLATION_LANGUAGES } from "@/features/transcripts/types";
 import type { TranslationLanguage } from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
@@ -77,7 +78,10 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   const {
     data: summary,
     isLoading: isSummaryLoading,
-  } = useSummary(id, { enabled: isReady && !isGuest });
+  } = useSummary(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
   const regenerateSummary = useRegenerateSummary(id);
 
   const activity = useMemo<ActivityItem[]>(() => {
@@ -143,6 +147,15 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     setLastTranscriptId(transcript?.id);
     setEditedBlocks(null);
     setTranscriptView("raw");
+    // Seed the language selector from the persisted translation (if any) so
+    // a reload shows the translation that's actually stored, instead of
+    // always defaulting to "en" and hiding it behind a mismatched selector.
+    const persistedLanguage = transcript?.translatedLanguage;
+    setTranslationLanguage(
+      TRANSLATION_LANGUAGES.some((language) => language.value === persistedLanguage)
+        ? (persistedLanguage as TranslationLanguage)
+        : "en",
+    );
   }
   const transcriptBlocks = editedBlocks ?? transcript?.blocks ?? [];
   const hasNormalizedTranscript = Boolean(transcript?.normalizedBlocks);

@@ -27,7 +27,15 @@ def generate_normalized_transcript(db: Session, meeting_id: uuid.UUID) -> Transc
         TranscriptChunk(start=segment["start"], end=segment["end"], text=segment["text"])
         for segment in raw_segments
     ]
-    result = get_ai_provider().normalize_transcript(chunks, language=transcript.language)
+    try:
+        result = get_ai_provider().normalize_transcript(chunks, language=transcript.language)
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(
+            f"Normalization failed: the AI provider is unavailable or returned an error ({exc}).",
+            status.HTTP_502_BAD_GATEWAY,
+        ) from exc
     normalized_text_by_index = {segment.index: segment.text for segment in result.segments}
 
     normalized_segments = [

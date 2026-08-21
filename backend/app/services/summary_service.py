@@ -12,17 +12,38 @@ from app.services.ai.factory import get_ai_provider
 
 
 def generate_summary(db: Session, meeting_id: uuid.UUID) -> Summary:
-    """Runs the Local Summary Engine for a meeting: reads its transcript, asks
-    the configured `AIProvider` (Ollama, locally) for a sectioned summary, and
-    upserts the result.
+    """Runs the Local Summary Engine for a meeting: reads its transcript
+    (the normalized transcript when one has already been generated,
+    otherwise the raw one), asks the configured `AIProvider` (Ollama,
+    locally) for a sectioned summary, and upserts the result.
     """
     transcript = get_transcript_by_meeting_id(db, meeting_id)
     if transcript is None:
         raise AppError("Transcript not found", status.HTTP_404_NOT_FOUND)
 
-    result = get_ai_provider().generate_structured_summary(
-        transcript.transcript, language=transcript.language
-    )
+    source_text = transcript.normalized_transcript or transcript.transcript
+
+    try:
+        result = get_ai_provider().generate_structured_summary(
+            source_text, language=transcript.language
+        )
+    except AppError:
+        raise
+    except Exception as exc:
+        raise AppError(
+            f"Summary generation failed: the AI provider is unavailable or returned an error ({exc}).",
+            status.HTTP_502_BAD_GATEWAY,
+        ) from exc
+
+    if not result.executive_summary.strip():
+        # The provider returned a response it couldn't parse into a summary
+        # (see `OllamaProvider.generate_structured_summary`'s empty-result
+        # fallback) — treat that the same as a provider error rather than
+        # persisting an empty "successful" summary.
+        raise AppError(
+            "Summary generation failed: the AI provider returned no usable summary.",
+            status.HTTP_502_BAD_GATEWAY,
+        )
 
     return upsert_summary(
         db,

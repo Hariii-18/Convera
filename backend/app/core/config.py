@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     whisper_model_size: str = "base"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    # Only used as a retry when `whisper_model_size` produces unusable output
+    # (empty or garbage/hallucinated — see `is_unusable_transcription`) —
+    # never the default. See `workers.processor.transcribe_with_fallback`.
+    whisper_fallback_model_size: str = "small"
 
     # Selects the `AIProvider` implementation from `app.services.ai.factory`.
     # Only "ollama" is implemented; "openai", "gemini", "claude" are reserved
