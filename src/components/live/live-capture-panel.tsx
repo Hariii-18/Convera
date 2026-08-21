@@ -12,8 +12,10 @@ import { formatElapsed } from "@/components/processing/format";
 import { extractErrorMessage } from "@/features/auth/error";
 import type { CaptureErrorReason } from "@/features/live-meetings/audio-capture";
 import { useAudioCapture } from "@/features/live-meetings/hooks/use-audio-capture";
+import { useLiveAudioTransport } from "@/features/live-meetings/hooks/use-live-audio-transport";
 import { useStartLiveMeeting } from "@/features/live-meetings/hooks/use-start-live-meeting";
 import { useStopLiveMeeting } from "@/features/live-meetings/hooks/use-stop-live-meeting";
+import { getAccessTokenCookie } from "@/lib/cookies";
 import { cn } from "@/lib/utils";
 
 /** Set only from event handlers (Start/Stop clicks and their results) — never mirrored from other state via an effect. */
@@ -48,7 +50,8 @@ const STATUS_CONFIG: Record<
  * Chunks are queued locally only — Phase 4 owns sending them anywhere.
  */
 function LiveCapturePanel() {
-  const capture = useAudioCapture();
+  const liveTransport = useLiveAudioTransport();
+  const capture = useAudioCapture((chunk) => liveTransport.sendChunk(chunk));
   const startMutation = useStartLiveMeeting();
   const stopMutation = useStopLiveMeeting();
 
@@ -63,7 +66,7 @@ function LiveCapturePanel() {
   // state inside `capture` — derive the panel's displayed phase from that
   // plus our own session phase instead of mirroring it into more state.
   const phase: DisplayPhase =
-    capture.error && sessionPhase !== "stopped"
+    (capture.error || liveTransport.error) && sessionPhase !== "stopped"
       ? "error"
       : sessionPhase === "starting" && capture.state === "capturing"
         ? "live"
@@ -72,7 +75,9 @@ function LiveCapturePanel() {
   const captureErrorMessage = capture.error
     ? (CAPTURE_ERROR_MESSAGES[capture.error.reason] ?? capture.error.message)
     : null;
-  const errorMessage = captureErrorMessage ?? mutationErrorMessage;
+  const transportErrorMessage = liveTransport.error?.message ?? null;
+  const errorMessage = captureErrorMessage ?? transportErrorMessage ?? mutationErrorMessage;
+  const { transcriptionReady, transcripts, transcriptionError } = liveTransport;
 
   // Toast is an imperative call into an external system, not a React state
   // update, so this is a legitimate effect — it just reacts to the capture
@@ -80,6 +85,22 @@ function LiveCapturePanel() {
   React.useEffect(() => {
     if (captureErrorMessage) toast.error(captureErrorMessage);
   }, [captureErrorMessage]);
+
+  React.useEffect(() => {
+    if (transportErrorMessage) toast.error(transportErrorMessage);
+  }, [transportErrorMessage]);
+
+  React.useEffect(() => {
+    if (transcriptionError) toast.error(transcriptionError);
+  }, [transcriptionError]);
+
+  // Bounded-queue backpressure (Phase 4 §10): if the transport can't keep
+  // up, stop capture cleanly rather than letting the queue grow unbounded.
+  React.useEffect(() => {
+    if (liveTransport.error?.reason === "queue_overflow") {
+      void capture.stopCapture();
+    }
+  }, [liveTransport.error, capture]);
 
   // Elapsed timer, ticking only while actually live.
   React.useEffect(() => {
@@ -107,11 +128,29 @@ function LiveCapturePanel() {
     setElapsedSeconds(0);
     captureStartRef.current = null;
 
+    let session: Awaited<ReturnType<typeof startMutation.mutateAsync>>;
     try {
-      const session = await startMutation.mutateAsync(undefined);
+      session = await startMutation.mutateAsync(undefined);
       setMeetingId(session.meetingId);
     } catch (err) {
       const message = extractErrorMessage(err);
+      setMutationErrorMessage(message);
+      toast.error(message);
+      setSessionPhase("error");
+      return;
+    }
+
+    const token = getAccessTokenCookie();
+    if (!token) {
+      setMutationErrorMessage("Not authenticated.");
+      setSessionPhase("error");
+      return;
+    }
+
+    try {
+      await liveTransport.connect(session.meetingId, token);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to connect audio transport.";
       setMutationErrorMessage(message);
       toast.error(message);
       setSessionPhase("error");
@@ -126,6 +165,7 @@ function LiveCapturePanel() {
 
     setSessionPhase("stopping");
     await capture.stopCapture();
+    await liveTransport.close();
 
     try {
       await stopMutation.mutateAsync(meetingId);
@@ -203,7 +243,7 @@ function LiveCapturePanel() {
           </Button>
         </div>
 
-        {/* Phase 3 debug readout — chunking is only proven locally, nothing is uploaded yet. */}
+        {/* Phase 3 + 4 debug readout — capture + transport, nothing further downstream yet. */}
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-muted/50 px-3 py-2.5 text-xs sm:grid-cols-4">
           <div className="flex flex-col gap-0.5">
             <dt className="text-muted-foreground">Chunks</dt>
@@ -225,7 +265,60 @@ function LiveCapturePanel() {
               {meetingId ?? "—"}
             </dd>
           </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-muted-foreground">Socket</dt>
+            <dd className="font-medium text-foreground">{liveTransport.state}</dd>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-muted-foreground">Last sent #</dt>
+            <dd className="font-medium text-foreground">
+              {liveTransport.stats.lastSentSequence ?? "—"}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-muted-foreground">Last acked #</dt>
+            <dd className="font-medium text-foreground">
+              {liveTransport.stats.lastAckedSequence ?? "—"}
+            </dd>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <dt className="text-muted-foreground">Queued</dt>
+            <dd className="font-medium text-foreground">{liveTransport.stats.queued}</dd>
+          </div>
         </dl>
+
+        {/* Phase 5: live transcription status + segments as they arrive. No
+            final Transcript Viewer, normalization, or summary here — that's
+            later phases. */}
+        {(phase === "live" || phase === "stopping" || transcripts.length > 0) && (
+          <div className="flex flex-col gap-2 rounded-lg border border-border px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-medium text-foreground">Live transcript</span>
+              <StatusBadge status={transcriptionReady ? "success" : "info"}>
+                {transcriptionReady ? "Connected" : "Transcription starting…"}
+              </StatusBadge>
+            </div>
+            {transcriptionError && (
+              <p className="text-xs text-destructive">{transcriptionError}</p>
+            )}
+            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto text-xs">
+              {transcripts.length === 0 ? (
+                <p className="text-muted-foreground">
+                  {transcriptionReady ? "Listening for speech…" : "Waiting for transcription to start…"}
+                </p>
+              ) : (
+                transcripts.map((segment) => (
+                  <p key={segment.sequence} className="text-foreground">
+                    <span className="mr-1.5 font-mono text-[10px] text-muted-foreground">
+                      {formatElapsed(Math.floor(segment.start))}
+                    </span>
+                    {segment.text}
+                  </p>
+                ))
+              )}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   );

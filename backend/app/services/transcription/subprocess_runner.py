@@ -30,6 +30,7 @@ from multiprocessing.connection import Connection
 import numpy as np
 
 from app.services.transcription.base import TranscriptionResult, is_unusable_transcription
+from app.services.transcription.process_utils import terminate_process
 
 logger = logging.getLogger("converra")
 
@@ -179,19 +180,4 @@ def terminate_active_processes() -> None:
 
 
 def _terminate(process: mp.process.BaseProcess) -> None:
-    """Ensures `process` is dead and reaped before returning, escalating
-    from terminate() (SIGTERM) to kill() (SIGKILL) if it doesn't exit
-    promptly, so the OS reclaims its memory -- and anything it started,
-    including a CTranslate2 worker -- no matter what.
-    """
-    pid = process.pid
-    if process.is_alive():
-        process.terminate()
-        process.join(_TERMINATE_JOIN_TIMEOUT_SECONDS)
-    if process.is_alive():
-        logger.warning("Transcription worker process pid=%s ignored terminate(); killing", pid)
-        process.kill()
-        process.join(_TERMINATE_JOIN_TIMEOUT_SECONDS)
-    exitcode = process.exitcode
-    process.close()
-    logger.info("Transcription worker process pid=%s reaped (exitcode=%s)", pid, exitcode)
+    terminate_process(process, _TERMINATE_JOIN_TIMEOUT_SECONDS)

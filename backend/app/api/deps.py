@@ -44,3 +44,28 @@ def get_current_user(
         )
 
     return user
+
+
+def get_ws_user(db: Session, token: str | None) -> User | None:
+    """Same JWT verified by `get_current_user`, adapted for WebSocket auth.
+
+    Browsers cannot set an `Authorization` header on a WebSocket handshake,
+    so the token travels as a `?token=` query param instead — same secret,
+    same `decode_access_token`, same user lookup, just a different carrier.
+    Returns `None` (rather than raising) so the caller can close the socket
+    with a WS-appropriate code instead of an HTTP error response.
+    """
+    if not token:
+        return None
+
+    try:
+        subject = decode_access_token(token)
+        user_id = int(subject)
+    except (InvalidTokenError, ValueError):
+        return None
+
+    user = get_user_by_id(db, user_id)
+    if user is None or not user.is_active:
+        return None
+
+    return user
