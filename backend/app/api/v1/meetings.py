@@ -9,13 +9,13 @@ from app.crud.meeting import (
     create_meeting,
     get_meeting,
     list_meetings,
-    soft_delete_meeting,
     update_meeting,
 )
 from app.db.session import get_db
 from app.models.meeting import Meeting
 from app.models.user import User
 from app.schemas.meeting import MeetingCreate, MeetingRead, MeetingUpdate
+from app.services.meeting_service import delete_meeting_cascade
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -71,4 +71,4 @@ def delete(
     current_user: User = Depends(get_current_user),
 ) -> None:
     meeting = _get_owned_meeting(db, meeting_id, current_user)
-    soft_delete_meeting(db, meeting)
+    delete_meeting_cascade(db, meeting)

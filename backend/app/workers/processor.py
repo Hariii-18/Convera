@@ -1,9 +1,14 @@
-"""Real transcription pipeline steps: download -> extract audio -> load model -> transcribe.
+"""Real transcription pipeline steps: download -> extract audio -> transcribe.
 
-Each step wraps a blocking call (network I/O, audio decoding, model inference)
-in `asyncio.to_thread` so it doesn't block the event loop the rest of the API
-runs on. Only depends on `app.services.transcription`'s provider-agnostic
-interface, so switching `TRANSCRIPTION_PROVIDER` never touches this module.
+Each step wraps a blocking call (network I/O, audio decoding, model
+inference) in `asyncio.to_thread` so it doesn't block the event loop the
+rest of the API runs on. Transcription itself (model load, base pass, and
+the small-model fallback if needed) runs in a dedicated child process --
+see `transcription.subprocess_runner` -- that this module starts and tears
+down per job, so the CTranslate2 model it loads is never resident in this
+process once the phase is done. Only depends on `app.services.transcription`'s
+provider-agnostic interface, so switching `TRANSCRIPTION_PROVIDER` never
+touches this module.
 """
 
 import asyncio
@@ -11,16 +16,14 @@ import logging
 
 import numpy as np
 
-from app.core.config import get_settings
 from app.models.upload import Upload
 from app.services.storage_service import download_file
 from app.services.transcription.audio import extract_audio
-from app.services.transcription.base import (
-    TranscriptionProvider,
-    TranscriptionResult,
-    is_unusable_transcription,
+from app.services.transcription.base import TranscriptionResult
+from app.services.transcription.subprocess_runner import (
+    run_transcription_job,
+    terminate_active_processes,
 )
-from app.services.transcription.factory import get_transcription_provider
 
 logger = logging.getLogger("converra")
 
@@ -35,52 +38,32 @@ async def extract_audio_track(file_bytes: bytes) -> tuple[np.ndarray, float]:
     return await asyncio.to_thread(extract_audio, file_bytes)
 
 
-async def load_provider() -> TranscriptionProvider:
-    """Loads (or reuses, if already warm) the configured (default/base) transcription provider."""
-    return await asyncio.to_thread(get_transcription_provider)
-
-
-async def transcribe(provider: TranscriptionProvider, waveform: np.ndarray) -> TranscriptionResult:
-    return await asyncio.to_thread(provider.transcribe, waveform)
-
-
-async def transcribe_with_fallback(
-    provider: TranscriptionProvider, waveform: np.ndarray
-) -> tuple[TranscriptionResult, str, str | None]:
-    """Transcribes with the already-loaded base provider, and — only if that
+async def transcribe_with_fallback(waveform: np.ndarray) -> tuple[TranscriptionResult, str, str | None]:
+    """Transcribes with the configured base model, and -- only if that
     produced unusable output (see `is_unusable_transcription`: empty, or
-    garbage/hallucinated — dominated by a repeated character, mostly
-    non-alphabetic, or failing Whisper's own confidence heuristics) —
+    garbage/hallucinated -- dominated by a repeated character, mostly
+    non-alphabetic, or failing Whisper's own confidence heuristics) --
     retries once with the configured `whisper_fallback_model_size` ("small"
     by default).
 
-    A valid base result is never retried, and the fallback model is never
-    used as the default; it's loaded lazily, on demand, only on this path.
+    Both attempts run inside one dedicated child process (see
+    `subprocess_runner.run_transcription_job`), which is terminated before
+    this call returns -- success, fallback, or failure -- so the model(s)
+    it loaded never linger in this (FastAPI) process.
 
     Returns `(result, model_used, fallback_reason)`. `fallback_reason` is
     `None` when the base pass was already usable.
     """
-    settings = get_settings()
-    base_size = settings.whisper_model_size
+    return await asyncio.to_thread(run_transcription_job, waveform)
 
-    result = await asyncio.to_thread(provider.transcribe, waveform)
-    if not is_unusable_transcription(result):
-        return result, base_size, None
 
-    fallback_size = settings.whisper_fallback_model_size
-    reason = (
-        f"base model '{base_size}' produced unusable output "
-        f"(segments={len(result.segments)}, word_count={result.word_count})"
-    )
-    logger.warning("Transcription fallback triggered: %s -> retrying with '%s'", reason, fallback_size)
-
-    fallback_provider = await asyncio.to_thread(get_transcription_provider, fallback_size)
-    fallback_result = await asyncio.to_thread(fallback_provider.transcribe, waveform)
-
-    if is_unusable_transcription(fallback_result):
-        logger.warning(
-            "Fallback model '%s' also produced unusable output (segments=%d, word_count=%d)",
-            fallback_size, len(fallback_result.segments), fallback_result.word_count,
-        )
-
-    return fallback_result, fallback_size, reason
+async def release_transcription_resources() -> None:
+    """Defensive cleanup stage: `transcribe_with_fallback` already
+    terminates its own child process before returning, so under normal
+    operation this finds nothing to do. Kept as an explicit pipeline step
+    so every job -- including a retry that resumes from an existing
+    transcript and never calls `transcribe_with_fallback` at all -- confirms
+    no transcription worker process is attached to this one before summary
+    generation starts.
+    """
+    await asyncio.to_thread(terminate_active_processes)

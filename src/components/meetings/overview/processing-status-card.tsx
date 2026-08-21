@@ -1,6 +1,7 @@
 import * as React from "react";
-import { Cpu } from "lucide-react";
+import { Cpu, RotateCw } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,6 +14,9 @@ import type { ProcessingJob } from "@/features/processing/mappers";
 type ProcessingStatusCardProps = React.ComponentProps<"div"> & {
   job?: ProcessingJob | null;
   loading?: boolean;
+  /** Presentational only — the caller owns what retrying actually does. */
+  onRetry?: () => void;
+  isRetrying?: boolean;
 };
 
 function elapsedSeconds(job: ProcessingJob): number {
@@ -32,6 +36,8 @@ function ProcessingStatusCard({
   className,
   job,
   loading = false,
+  onRetry,
+  isRetrying = false,
   ...props
 }: ProcessingStatusCardProps) {
   return (
@@ -65,6 +71,18 @@ function ProcessingStatusCard({
             />
             {job.status === "failed" && job.errorMessage && (
               <p className="text-xs text-destructive">{job.errorMessage}</p>
+            )}
+            {job.status === "failed" && onRetry && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="self-start"
+                onClick={onRetry}
+                disabled={isRetrying}
+              >
+                <RotateCw data-icon="inline-start" />
+                {isRetrying ? "Retrying…" : "Retry"}
+              </Button>
             )}
           </div>
         )}

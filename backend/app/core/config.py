@@ -34,13 +34,26 @@ class Settings(BaseSettings):
     # never the default. See `workers.processor.transcribe_with_fallback`.
     whisper_fallback_model_size: str = "small"
 
-    # Selects the `AIProvider` implementation from `app.services.ai.factory`.
-    # Only "ollama" is implemented; "openai", "gemini", "claude" are reserved
-    # names for future providers.
+    # Selects the `AIProvider` implementation from `app.services.ai.factory`
+    # for normalization and translation. Only "ollama" is implemented here;
+    # "openai", "gemini", "claude" are reserved names for future providers.
+    # Summary generation does NOT use this setting — see
+    # `summary_ai_provider` below.
     ai_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
     ollama_request_timeout_seconds: float = 120.0
+
+    # Selects the `AIProvider` implementation used specifically for Summary
+    # generation (see `app.services.ai.factory.get_summary_ai_provider`).
+    # Kept independent of `ai_provider` so Summary can run on a cloud
+    # provider (no local model resources, reliable in Codespaces) while
+    # normalization/translation keep using whatever `ai_provider` selects.
+    summary_ai_provider: str = "openai"
+    openai_api_key: str = ""
+    openai_summary_model: str = "gpt-4.1"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_request_timeout_seconds: float = 60.0
 
     @property
     def cors_origin_list(self) -> list[str]:

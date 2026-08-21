@@ -36,6 +36,7 @@ class FasterWhisperProvider(TranscriptionProvider):
             device=settings.whisper_device,
             compute_type=settings.whisper_compute_type,
         )
+        logger.info("Loaded faster-whisper model '%s'", self.model_size)
 
     def transcribe(self, audio: np.ndarray, *, sample_rate: int = 16000) -> TranscriptionResult:
         # `multilingual=True` re-runs language detection on every ~30s chunk

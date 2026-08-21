@@ -1,6 +1,7 @@
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict
 
 from fastapi import status
@@ -24,12 +25,12 @@ from app.models.processing_job import ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.meeting import MeetingUpdate
-from app.services.summary_service import generate_summary
+from app.services.pipeline_service import run_post_transcription_pipeline
 from app.services.transcription.base import is_unusable_transcription
 from app.workers.processor import (
     download_upload,
     extract_audio_track,
-    load_provider,
+    release_transcription_resources,
     transcribe_with_fallback,
 )
 
@@ -40,6 +41,29 @@ def _sync_meeting_status(db: Session, meeting_id: uuid.UUID, user_id: int, meeti
     meeting = get_meeting(db, meeting_id, user_id)
     if meeting is not None:
         update_meeting(db, meeting, MeetingUpdate(status=meeting_status))
+
+
+class _JobCancelled(Exception):
+    """Raised from a pipeline stage-reporter when the job row was deleted
+    mid-run (the user cancelled it), so `execute_processing_job` can stop
+    without treating the run as a failure.
+    """
+
+
+def _pipeline_stage_reporter(db: Session, job_id: uuid.UUID) -> Callable[[str, int], None]:
+    """Bridges the upload-agnostic pipeline's `on_stage` callback to this
+    job's `ProcessingJob` row, re-fetching it before every update so a
+    cancellation (job row deleted mid-run) stops the pipeline the same way
+    every other step in this file already does.
+    """
+
+    def _on_stage(stage: str, progress: int) -> None:
+        job = get_processing_job_by_id(db, job_id)
+        if job is None:
+            raise _JobCancelled()
+        update_job_progress(db, job, status="processing", stage=stage, progress=progress)
+
+    return _on_stage
 
 
 def queue_processing_job(db: Session, *, upload: Upload, user: User) -> ProcessingJob:
@@ -126,19 +150,19 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Loading model", progress=35)
 
-            logger.info("[timing] job %s load_model start", job_id)
-            t0 = time.perf_counter()
-            provider = await load_provider()
-            logger.info("[timing] job %s load_model end elapsed=%.3fs", job_id, time.perf_counter() - t0)
-
             job = get_processing_job_by_id(db, job_id)
             if job is None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Transcribing", progress=45)
 
+            # Model loading now happens inside the dedicated transcription
+            # worker process spawned by `transcribe_with_fallback` itself
+            # (see `subprocess_runner.run_transcription_job`), so it's timed
+            # as part of this single "transcription" span rather than a
+            # separate step.
             logger.info("[timing] job %s transcription start", job_id)
             t0 = time.perf_counter()
-            result, model_used, fallback_reason = await transcribe_with_fallback(provider, waveform)
+            result, model_used, fallback_reason = await transcribe_with_fallback(waveform)
             logger.info(
                 "[timing] job %s transcription end elapsed=%.3fs model=%s fallback_reason=%s",
                 job_id, time.perf_counter() - t0, model_used, fallback_reason,
@@ -192,22 +216,40 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 job_id, job.meeting_id,
             )
 
+        logger.info("[timing] job %s release_transcription_resources start", job_id)
+        t0 = time.perf_counter()
+        await release_transcription_resources()
+        logger.info(
+            "[timing] job %s release_transcription_resources end elapsed=%.3fs",
+            job_id, time.perf_counter() - t0,
+        )
+
         job = get_processing_job_by_id(db, job_id)
         if job is None:
             return
-        job = update_job_progress(db, job, status="processing", stage="Generating summary", progress=95)
 
-        logger.info("[timing] job %s summary start", job_id)
+        # Everything downstream of a finalized transcript — normalize, then
+        # summarize — lives in the shared pipeline so this same logic runs
+        # for both a recorded upload (here) and, in a later phase, a
+        # finalized Live Meeting transcript. It's resumable on its own: a
+        # meeting that already has a normalized transcript and/or a summary
+        # skips straight past those steps, so a retry never re-normalizes or
+        # re-summarizes work that already succeeded.
+        logger.info("Processing job %s: starting post-transcription pipeline", job_id)
         t0 = time.perf_counter()
         try:
-            generate_summary(db, job.meeting_id)
+            run_post_transcription_pipeline(
+                db, job.meeting_id, on_stage=_pipeline_stage_reporter(db, job_id)
+            )
+        except _JobCancelled:
+            return
         except AppError as exc:
-            # The transcript (saved above, or from a prior run) is left
-            # untouched — only the summary step is marked failed, and a
-            # retry of this job will pick back up here without
-            # re-transcribing.
+            # The transcript (and normalized transcript, if that step had
+            # already succeeded) is left untouched — only the failed step is
+            # marked failed, and a retry of this job resumes from it without
+            # re-transcribing or redoing earlier pipeline steps.
             logger.warning(
-                "Processing job %s summary generation failed (transcript preserved): %s",
+                "Processing job %s post-transcription pipeline failed (prior steps preserved): %s",
                 job_id, exc.message,
             )
             job = get_processing_job_by_id(db, job_id)
@@ -215,7 +257,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 mark_job_failed(db, job, error_message=exc.message)
                 _sync_meeting_status(db, job.meeting_id, job.user_id, "failed")
             return
-        logger.info("[timing] job %s summary end elapsed=%.3fs", job_id, time.perf_counter() - t0)
+        logger.info("[timing] job %s pipeline end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:

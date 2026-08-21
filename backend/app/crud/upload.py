@@ -55,6 +55,14 @@ def get_upload(db: Session, upload_id: uuid.UUID, user_id: int) -> Upload | None
     )
 
 
+def list_uploads_by_meeting_id(db: Session, meeting_id: uuid.UUID) -> list[Upload]:
+    return (
+        db.query(Upload)
+        .filter(Upload.meeting_id == meeting_id, Upload.deleted_at.is_(None))
+        .all()
+    )
+
+
 def upload_exists_with_filename(db: Session, user_id: int, original_filename: str) -> bool:
     return (
         db.query(Upload.id)

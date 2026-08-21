@@ -30,6 +30,7 @@ import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
+import { useRetryProcessing } from "@/features/processing/hooks/use-retry-processing";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
@@ -63,6 +64,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const { data: processingJob, isLoading: isProcessingJobLoading } =
     useProcessingJob(id, { enabled: isReady && !isGuest });
+  const retryProcessing = useRetryProcessing();
 
   const {
     data: transcript,
@@ -202,6 +204,15 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     );
   }
 
+  function handleRetryProcessing() {
+    if (!processingJob || retryProcessing.isPending) return;
+    retryProcessing.mutate(processingJob.id, {
+      onError: (mutationError) => {
+        toast.error(extractErrorMessage(mutationError));
+      },
+    });
+  }
+
   function handleDeleteConfirm() {
     if (!deleteTarget) return;
     deleteMeeting.mutate(deleteTarget.id, {
@@ -278,6 +289,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             onViewFullSummary={() => setActiveTab("summary")}
             onViewTimeline={() => setActiveTab("timeline")}
             onDownloadRecording={() => toast("Download recording")}
+            onRetryProcessing={handleRetryProcessing}
+            isRetryingProcessing={retryProcessing.isPending}
           />
         )}
 

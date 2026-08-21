@@ -19,13 +19,46 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+// `/auth/login` and `/auth/register` return 401/other errors for a rejected
+// *attempt* (wrong password, etc.) — that says nothing about an existing
+// session's token, so it must never be treated as "the session is invalid."
+// Every other 401 comes from the backend's `get_current_user` dependency
+// rejecting the bearer token itself (missing, expired, or otherwise
+// invalid), which is the only case that should end the session.
+const AUTH_ATTEMPT_PATHS = ["/auth/login", "/auth/register"];
+
+function isAuthAttemptRequest(url?: string): boolean {
+  return Boolean(url) && AUTH_ATTEMPT_PATHS.some((path) => url!.includes(path));
+}
+
+// Guards against redirecting more than once when several requests 401 back
+// to back (e.g. a page that fires off several queries at once right as the
+// token expires) — the first one already sends the browser to /login.
+let isRedirectingToLogin = false;
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (axios.isAxiosError(error) && error.response?.status === 401) {
+    const isSessionInvalidated =
+      axios.isAxiosError(error) &&
+      error.response?.status === 401 &&
+      !isAuthAttemptRequest(error.config?.url);
+
+    if (isSessionInvalidated) {
       clearAccessTokenCookie();
       useAuthStore.getState().clearUser();
+
+      if (typeof window !== "undefined" && !isRedirectingToLogin) {
+        const onAuthPage = ["/login", "/register", "/forgot-password"].includes(
+          window.location.pathname,
+        );
+        if (!onAuthPage) {
+          isRedirectingToLogin = true;
+          window.location.assign("/login");
+        }
+      }
     }
+
     return Promise.reject(error);
   },
 );

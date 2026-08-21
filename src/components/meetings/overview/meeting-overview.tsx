@@ -34,6 +34,9 @@ type MeetingOverviewProps = React.ComponentProps<"div"> & {
   onViewTimeline?: () => void;
   /** Presentational only — the caller owns what downloading actually does. */
   onDownloadRecording?: () => void;
+  /** Presentational only — the caller owns what retrying processing actually does. */
+  onRetryProcessing?: () => void;
+  isRetryingProcessing?: boolean;
 };
 
 /**
@@ -56,6 +59,8 @@ function MeetingOverview({
   onViewFullSummary,
   onViewTimeline,
   onDownloadRecording,
+  onRetryProcessing,
+  isRetryingProcessing = false,
   ...props
 }: MeetingOverviewProps) {
   return (
@@ -83,6 +88,8 @@ function MeetingOverview({
         <ProcessingStatusCard
           job={processingJob}
           loading={loading || processingJobLoading}
+          onRetry={onRetryProcessing}
+          isRetrying={isRetryingProcessing}
         />
         <RecordingCard
           recording={recording}
