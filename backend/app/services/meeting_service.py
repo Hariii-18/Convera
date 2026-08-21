@@ -5,6 +5,7 @@ from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
+from app.crud.live_meeting_session import get_live_session_by_meeting_id
 from app.crud.processing_job import list_processing_jobs
 from app.crud.summary import get_summary_by_meeting_id
 from app.crud.transcript import get_transcript_by_meeting_id
@@ -17,8 +18,8 @@ logger = logging.getLogger("converra")
 
 def delete_meeting_cascade(db: Session, meeting: Meeting) -> None:
     """Deletes a meeting and every record that belongs to it: its uploads
-    (DB row + Supabase Storage object), processing jobs, transcript, and
-    summary.
+    (DB row + Supabase Storage object), processing jobs, transcript,
+    summary, and live-meeting session (if it was a Live Meeting).
 
     The DB-level `ondelete="CASCADE"`/`"SET NULL"` on these tables' foreign
     keys never fires here because a meeting is soft-deleted (its row is
@@ -50,6 +51,10 @@ def delete_meeting_cascade(db: Session, meeting: Meeting) -> None:
 
         for job in list_processing_jobs(db, meeting.user_id, meeting_id=meeting.id):
             db.delete(job)
+
+        live_session = get_live_session_by_meeting_id(db, meeting.id)
+        if live_session is not None:
+            db.delete(live_session)
 
         transcript = get_transcript_by_meeting_id(db, meeting.id)
         if transcript is not None:

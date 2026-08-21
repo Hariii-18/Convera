@@ -1,9 +1,6 @@
-import { Radio } from "lucide-react";
-
 import { PageContainer } from "@/components/layout/page-container";
 import { SectionHeader } from "@/components/layout/section-header";
-import { Card, CardContent } from "@/components/ui/card";
-import { EmptyState } from "@/components/ui/empty-state";
+import { LiveCapturePanel } from "@/components/live/live-capture-panel";
 
 export default function LiveMeetingPage() {
   return (
@@ -11,17 +8,9 @@ export default function LiveMeetingPage() {
       <SectionHeader
         as="h1"
         title="Live Meeting"
-        description="Join or start a live meeting to see real-time transcription here."
+        description="Start a live meeting to capture microphone audio directly from your browser."
       />
-      <Card>
-        <CardContent>
-          <EmptyState
-            icon={<Radio />}
-            title="No live meeting in progress"
-            description="Once a live meeting starts, the real-time transcript and insights will appear here."
-          />
-        </CardContent>
-      </Card>
+      <LiveCapturePanel />
     </PageContainer>
   );
 }
