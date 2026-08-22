@@ -100,6 +100,14 @@ export class LiveAudioTransport {
   private readonly queue: AudioChunkMeta[] = [];
   private readonly pendingAcks = new Set<number>();
   private draining = false;
+  // Set once `close()` is called and never unset until the next `connect()`.
+  // `close()`'s own bounded waits can (and during a slow server-side
+  // finalization routinely do) time out and return before the browser's
+  // real `close` event actually fires -- by then `state` has already moved
+  // on to "closed" itself, so `onclose` can't tell a graceful shutdown from
+  // an unexpected one by comparing against `state`. This flag is the
+  // authoritative "did we ask for this" signal instead.
+  private intentionalClose = false;
 
   private generatedCount = 0;
   private sentCount = 0;
@@ -164,6 +172,8 @@ export class LiveAudioTransport {
   /** Opens the socket, sends "start", and resolves once "ready" comes back. */
   connect(meetingId: string, token: string): Promise<void> {
     if (this.socket) return Promise.resolve();
+
+    this.intentionalClose = false;
 
     return new Promise((resolve, reject) => {
       this.setState("connecting");
@@ -280,7 +290,7 @@ export class LiveAudioTransport {
           this.setState("closed");
           return;
         }
-        if (!reportedError && this.state !== "stopping" && this.state !== "error") {
+        if (!reportedError && !this.intentionalClose && this.state !== "error") {
           this.emitError(
             "closed_unexpectedly",
             `Connection closed unexpectedly (code ${event.code}).`,
@@ -356,6 +366,8 @@ export class LiveAudioTransport {
    * Safe to call from any state.
    */
   async close(): Promise<void> {
+    this.intentionalClose = true;
+
     const socket = this.socket;
     if (!socket) {
       this.setState("closed");

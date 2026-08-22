@@ -1,10 +1,12 @@
 """Provider-agnostic contract for AI-backed features (summarization,
 translation, action-item extraction, timeline generation).
 
-Every provider (Ollama today; OpenAI/Gemini/Claude later) implements
-`AIProvider` and is selected via `AI_PROVIDER` — see
-`factory.get_ai_provider`. Nothing above this layer should depend on which
-provider is configured.
+Every provider (Ollama, OpenAI today; Gemini/Claude later) implements
+`AIProvider`. The active provider is selected per feature — translation via
+`AI_PROVIDER` (`factory.get_ai_provider`), Summary via `SUMMARY_AI_PROVIDER`
+(`factory.get_summary_ai_provider`), and Normalization via
+`NORMALIZATION_AI_PROVIDER` (`factory.get_normalization_ai_provider`).
+Nothing above this layer should depend on which provider is configured.
 """
 
 from __future__ import annotations

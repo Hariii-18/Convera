@@ -1,12 +1,13 @@
 """Cloud LLM inference via OpenAI's Chat Completions API. Used for Summary
-generation (see `app.services.ai.factory.get_summary_ai_provider`) so
-automatic summaries don't depend on a local Ollama server / model resources.
+generation (see `app.services.ai.factory.get_summary_ai_provider`) and
+Normalization (see `app.services.ai.factory.get_normalization_ai_provider`)
+so neither depends on a local Ollama server / model resources.
 
-Only `generate_structured_summary` is implemented — normalization and
-translation keep running through the Ollama provider (`ai_provider`
-setting) and are out of scope for this provider. Calling any other method
-raises `NotImplementedError`, same as before this provider had a real
-`generate_structured_summary`.
+`generate_structured_summary` and `normalize_transcript` are implemented.
+Translation keeps running through the Ollama provider (`ai_provider`
+setting) and is out of scope for this provider — calling `translate`,
+`translate_transcript`, `summarize`, or `extract_action_items` raises
+`NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -23,6 +24,7 @@ from app.services.ai.base import (
     ActionItemsResult,
     AIProvider,
     NormalizationResult,
+    NormalizedSegment,
     StructuredSummaryResult,
     SummaryResult,
     SummaryTextItem,
@@ -36,6 +38,22 @@ from app.services.ai.base import (
 logger = logging.getLogger("converra")
 
 _JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+_NORMALIZATION_SYSTEM_PROMPT = (
+    "You are cleaning up a raw speech-to-text transcript for readability. "
+    "You will be given a JSON array of segments, each with an index \"i\" and "
+    "raw \"text\". For each segment, fix punctuation, spacing, and obvious "
+    "grammar or readability issues only. Apply a technical term or proper-name "
+    "correction only when you are highly confident it is a mis-transcription "
+    "(e.g. an obvious ASR error), not a rewording choice. Preserve Hindi, "
+    "Telugu, English, and mixed-language speech exactly as spoken — do not "
+    "translate or transliterate. Never add, remove, or reinterpret content, and "
+    "never change meaning. If a segment needs no changes, return it unchanged. "
+    "Keep the same number of segments, in the same order.\n\n"
+    "Return only a single JSON object (no markdown, no explanation) with "
+    'exactly one key "segments": an array of objects with keys "i" (the '
+    'original index) and "text" (the cleaned text).'
+)
 
 _STRUCTURED_SUMMARY_SYSTEM_PROMPT = (
     "You summarize meeting transcripts. Return only a single JSON object (no "
@@ -72,15 +90,20 @@ class OpenAIProvider(AIProvider):
         self._api_key = settings.openai_api_key
         self._base_url = settings.openai_base_url.rstrip("/")
         self._model = settings.openai_summary_model
+        self._normalization_model = settings.openai_normalization_model
         self._timeout = settings.openai_request_timeout_seconds
-        logger.info("Using OpenAI provider for summary generation (model=%s)", self._model)
+        logger.info(
+            "Using OpenAI provider (summary_model=%s, normalization_model=%s)",
+            self._model,
+            self._normalization_model,
+        )
 
-    def _chat_completion_json(self, *, system_prompt: str, user_prompt: str) -> str:
+    def _chat_completion_json(self, *, system_prompt: str, user_prompt: str, model: str | None = None) -> str:
         response = httpx.post(
             f"{self._base_url}/chat/completions",
             headers={"Authorization": f"Bearer {self._api_key}"},
             json={
-                "model": self._model,
+                "model": model or self._model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -199,7 +222,40 @@ class OpenAIProvider(AIProvider):
     def normalize_transcript(
         self, segments: list[TranscriptChunk], *, language: str | None = None
     ) -> NormalizationResult:
-        raise NotImplementedError("OpenAIProvider only implements generate_structured_summary")
+        if not segments:
+            return NormalizationResult(segments=[])
+
+        language_hint = f" The speech may be in {language}." if language else ""
+        indexed = [{"i": i, "text": segment.text} for i, segment in enumerate(segments)]
+        user_prompt = (
+            f"{language_hint}\n\nSegments:\n{json.dumps(indexed, ensure_ascii=False)}".strip()
+        )
+
+        raw = self._chat_completion_json(
+            system_prompt=_NORMALIZATION_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            model=self._normalization_model,
+        )
+        parsed = self._parse_json_object(raw)
+        segments_raw = parsed.get("segments") if parsed is not None else None
+        if not isinstance(segments_raw, list):
+            logger.warning("OpenAI returned non-JSON normalization response; leaving segments unchanged")
+            return NormalizationResult(segments=[])
+
+        cleaned: list[NormalizedSegment] = []
+        for entry in segments_raw:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                index = int(entry["i"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            text = str(entry.get("text", "")).strip()
+            if not (0 <= index < len(segments)) or not text:
+                continue
+            cleaned.append(NormalizedSegment(index=index, text=text))
+
+        return NormalizationResult(segments=cleaned)
 
     def translate_transcript(
         self,

@@ -39,6 +39,7 @@ from collections.abc import Awaitable, Callable
 
 from app.core.config import get_settings
 from app.services.transcription.audio import AudioExtractionError, extract_audio
+from app.services.transcription.base import TranscriptSegment
 from app.services.transcription.live_worker import LiveTranscriptionWorker
 
 logger = logging.getLogger("converra")
@@ -83,9 +84,23 @@ class LiveTranscriptionPipeline:
         self._overloaded = False
         self._closed = False
         self._ready = False
+        # Every committed segment this session has emitted, in order --
+        # Phase 6 reads this on finalize to persist the merged transcript.
+        # Already ordered/deduplicated by the emission logic in
+        # `_process_chunk` below (only segments extending past
+        # `_committed_until` are ever appended), so finalize does not need
+        # to redo that work.
+        self._segments: list[TranscriptSegment] = []
 
     def is_ready(self) -> bool:
         return self._ready
+
+    def get_transcript_segments(self) -> list[TranscriptSegment]:
+        """The ordered, deduplicated transcript segments committed so far.
+        Safe to call at any point in the pipeline's lifecycle, including
+        after `stop()`.
+        """
+        return list(self._segments)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -200,6 +215,9 @@ class LiveTranscriptionPipeline:
                     "end": round(abs_end, 2),
                     "text": text,
                 }
+            )
+            self._segments.append(
+                TranscriptSegment(start=round(abs_start, 2), end=round(abs_end, 2), text=text)
             )
             self._next_sequence += 1
             self._committed_until = max(self._committed_until, abs_end)

@@ -7,7 +7,7 @@ from app.core.exceptions import AppError
 from app.crud.transcript import get_transcript_by_meeting_id, update_normalized_transcript
 from app.models.transcript import Transcript
 from app.services.ai.base import TranscriptChunk
-from app.services.ai.factory import get_ai_provider
+from app.services.ai.factory import get_normalization_ai_provider
 
 
 def generate_normalized_transcript(db: Session, meeting_id: uuid.UUID) -> Transcript:
@@ -28,7 +28,7 @@ def generate_normalized_transcript(db: Session, meeting_id: uuid.UUID) -> Transc
         for segment in raw_segments
     ]
     try:
-        result = get_ai_provider().normalize_transcript(chunks, language=transcript.language)
+        result = get_normalization_ai_provider().normalize_transcript(chunks, language=transcript.language)
     except AppError:
         raise
     except Exception as exc:

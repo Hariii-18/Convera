@@ -1,4 +1,4 @@
-"""Live Meeting session lifecycle (Phase 2).
+"""Live Meeting session lifecycle (Phase 2) and finalization (Phase 6).
 
 Owns the state machine for a Live Meeting session, independent of the
 Meeting model's own `status` field (which stays in its existing
@@ -10,23 +10,25 @@ State machine:
 
     new -> live -> stopping -> finalizing -> completed
                  \\-> failed / cancelled (from live, stopping, or finalizing)
+                 (failed -> finalizing -> completed via `retry_live_meeting`)
 
-Only `start_live_meeting`, `get_live_session_read`, and `stop_live_meeting`
-are reachable from the public API in this phase. `begin_live_finalization`,
-`complete_live_meeting`, `fail_live_meeting`, and `cancel_live_meeting` are
-internal hooks for later phases (audio/chunk finalization, transcript
-merging) that own calling them once that work exists — Phase 2 does not call
-`run_post_transcription_pipeline` itself.
+`start_live_meeting`, `get_live_session_read`, `stop_live_meeting`, and
+(Phase 6) `finalize_live_meeting` / `retry_live_meeting` are reachable from
+the public API. `begin_live_finalization`, `complete_live_meeting`,
+`fail_live_meeting`, and `cancel_live_meeting` are internal transition
+helpers that `finalize_live_meeting`/`retry_live_meeting` drive.
 """
 
 import logging
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.crud.live_meeting_session import (
     create_live_session,
@@ -36,11 +38,14 @@ from app.crud.live_meeting_session import (
 )
 from app.crud.meeting import create_meeting
 from app.crud.processing_job import list_processing_jobs
-from app.crud.transcript import get_transcript_by_meeting_id
+from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
+from app.crud.upload import create_upload, list_uploads_by_meeting_id
 from app.models.live_meeting_session import LiveMeetingSession
 from app.models.user import User
-from app.schemas.live_meeting import LiveMeetingSessionRead
+from app.schemas.live_meeting import TERMINAL_LIVE_STATES, LiveMeetingSessionRead
 from app.schemas.meeting import MeetingCreate
+from app.services.pipeline_service import run_post_transcription_pipeline
+from app.services.transcription.base import TranscriptSegment
 
 logger = logging.getLogger("converra")
 
@@ -155,14 +160,23 @@ def build_session_read(db: Session, session: LiveMeetingSession) -> LiveMeetingS
 
 
 def stop_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
-    """`live -> stopping`. Idempotent if already stopping.
-
-    Does not finalize a transcript — that's Phase 6's responsibility, via
-    `begin_live_finalization` once audio/chunk finalization exists.
+    """`live -> stopping`. Idempotent for `stopping`/`finalizing`/`completed`
+    — states reachable via a normal stop that the WebSocket-driven
+    `finalize_live_meeting` (see `app.api.v1.live_meetings`) can race ahead
+    to before this REST call lands, since the frontend's Stop button drives
+    both the WebSocket's `{"type": "stop"}` message and this endpoint. A
+    `failed`/`cancelled` session is still rejected (409): those are a
+    distinct outcome, not "already stopped", so the caller should still see
+    a conflict rather than a silent no-op.
     """
+    locked = lock_live_session(db, session.id)
+    if locked is None:
+        raise AppError("Live session not found", status.HTTP_404_NOT_FOUND)
+    if locked.state in ("stopping", "finalizing", "completed"):
+        return locked
     return _transition(
         db,
-        session,
+        locked,
         allowed_sources=("live",),
         target="stopping",
         stopped_at=datetime.now(timezone.utc),
@@ -170,18 +184,17 @@ def stop_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSe
 
 
 def begin_live_finalization(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
-    """`stopping -> finalizing`. Internal hook for a future phase to call
-    once it starts merging/finalizing the live transcript. Does not touch
-    any transcript data itself.
+    """`stopping -> finalizing`. Called by `finalize_live_meeting` once it
+    starts merging/persisting the live transcript. Does not touch any
+    transcript data itself.
     """
     return _transition(db, session, allowed_sources=("stopping",), target="finalizing")
 
 
 def complete_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
-    """`finalizing -> completed`. Internal hook for a future phase to call
-    once a final transcript has been persisted and
-    `run_post_transcription_pipeline` has run. Not reachable from the public
-    API in this phase.
+    """`finalizing -> completed`. Called by `finalize_live_meeting` /
+    `retry_live_meeting` once a final transcript has been persisted and
+    `run_post_transcription_pipeline` has run.
     """
     return _transition(
         db,
@@ -215,3 +228,145 @@ def cancel_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeeting
         target="cancelled",
         ended_at=datetime.now(timezone.utc),
     )
+
+
+# Live audio is never persisted anywhere (Phase 4/5 only ever hold it
+# transiently in memory for transcription) -- the shared `Transcript` model's
+# `upload_id` FK assumes a recorded-upload origin, though, so finalizing a
+# live session needs *some* `Upload` row to point it at. This placeholder
+# carries no real file: `size_bytes=0` and a `storage_path` nothing is ever
+# written to. Reusing the existing `Upload` model/CRUD as-is (rather than
+# widening `Transcript.upload_id` to be nullable) keeps this a same-shape
+# citizen of the existing delete cascade (`meeting_service.delete_meeting_cascade`
+# already deletes every upload for a meeting) with no schema migration.
+_LIVE_PLACEHOLDER_MIME_TYPE = "audio/webm"
+
+
+def _get_or_create_live_placeholder_upload(db: Session, session: LiveMeetingSession) -> uuid.UUID:
+    existing = list_uploads_by_meeting_id(db, session.meeting_id)
+    if existing:
+        return existing[0].id
+    upload = create_upload(
+        db,
+        user_id=session.user_id,
+        meeting_id=session.meeting_id,
+        original_filename=f"live-meeting-{session.meeting_id}.webm",
+        stored_filename=f"live-{session.id}.webm",
+        storage_path=f"live-meetings/{session.meeting_id}/audio.webm",
+        bucket=get_settings().supabase_storage_bucket,
+        mime_type=_LIVE_PLACEHOLDER_MIME_TYPE,
+        size_bytes=0,
+    )
+    return upload.id
+
+
+def finalize_live_meeting(
+    db: Session, session: LiveMeetingSession, segments: list[TranscriptSegment]
+) -> LiveMeetingSession:
+    """Phase 6: `live/stopping -> stopping -> finalizing -> completed`.
+
+    Called once from the WebSocket handler's teardown (`app.api.v1.live_meetings`)
+    after `LiveTranscriptionPipeline.stop()` has drained whatever was queued
+    — on a clean `{"type": "stop"}`, an unexpected disconnect, or an
+    unhandled error alike, so a session never gets stuck in `live` forever.
+    `segments` is that pipeline's already ordered/deduplicated committed
+    transcript (see `LiveTranscriptionPipeline.get_transcript_segments`) —
+    this function does no further merging, only persists it.
+
+    Idempotent and bounded: a session already in a terminal state (this
+    connection's own prior finalize call, or a fatal-error path that already
+    called `fail_live_meeting`) is returned unchanged. Translation is never
+    triggered here — it stays a separate, user-initiated action, as it is
+    for recorded uploads.
+
+    Drives `live -> stopping -> finalizing` itself rather than going through
+    the public `stop_live_meeting` — that REST-facing function intentionally
+    rejects an already-`failed` session (409, see its docstring), which
+    would wrongly turn a fatal-error path that already called
+    `fail_live_meeting` before this runs into an unhandled exception here.
+    """
+    locked = lock_live_session(db, session.id)
+    if locked is None:
+        raise AppError("Live session not found", status.HTTP_404_NOT_FOUND)
+
+    if locked.state in TERMINAL_LIVE_STATES:
+        return locked
+
+    if locked.state == "live":
+        locked = _transition(
+            db,
+            locked,
+            allowed_sources=("live",),
+            target="stopping",
+            stopped_at=datetime.now(timezone.utc),
+        )
+
+    if locked.state == "stopping":
+        locked = begin_live_finalization(db, locked)
+
+    try:
+        existing_transcript = get_transcript_by_meeting_id(db, locked.meeting_id)
+        if existing_transcript is None:
+            # Only ever written once per live session -- a second finalize
+            # call for the same meeting only reaches here if the first one
+            # never got this far (it would already be terminal above), so
+            # this can't clobber a transcript a prior run already persisted.
+            transcript_text = " ".join(segment.text for segment in segments).strip()
+            upload_id = _get_or_create_live_placeholder_upload(db, locked)
+            upsert_transcript(
+                db,
+                meeting_id=locked.meeting_id,
+                upload_id=upload_id,
+                language="en",  # Live Meeting V1 is English-only, per Phase 5.
+                transcript=transcript_text,
+                segments=[asdict(segment) for segment in segments],
+                duration=segments[-1].end if segments else 0.0,
+                word_count=len(transcript_text.split()),
+            )
+        run_post_transcription_pipeline(db, locked.meeting_id)
+    except Exception as exc:
+        logger.exception("live meeting finalization failed meeting_id=%s", locked.meeting_id)
+        message = exc.message if isinstance(exc, AppError) else str(exc)
+        return fail_live_meeting(db, locked, error_message=message)
+
+    return complete_live_meeting(db, locked)
+
+
+def retry_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
+    """Retries a failed live-meeting finalization: `failed -> finalizing ->
+    completed`.
+
+    Live audio itself is never persisted, so unlike a recorded upload's
+    `ProcessingJob` retry, this can never re-run transcription — it only
+    resumes `run_post_transcription_pipeline` against the transcript
+    `finalize_live_meeting` already saved (that pipeline is itself
+    resumable: it skips normalization/summary steps that already succeeded,
+    so this never redoes work that already completed).
+    """
+    locked = lock_live_session(db, session.id)
+    if locked is None:
+        raise AppError("Live session not found", status.HTTP_404_NOT_FOUND)
+
+    if locked.state != "failed":
+        raise AppError(
+            f"Cannot retry live session in state '{locked.state}'", status.HTTP_409_CONFLICT
+        )
+
+    if get_transcript_by_meeting_id(db, locked.meeting_id) is None:
+        raise AppError(
+            "Cannot retry: no transcript was saved for this live session.",
+            status.HTTP_409_CONFLICT,
+        )
+
+    locked = _transition(
+        db, locked, allowed_sources=("failed",), target="finalizing", error_message=None
+    )
+
+    try:
+        run_post_transcription_pipeline(db, locked.meeting_id)
+    except Exception as exc:
+        logger.exception("live meeting retry failed meeting_id=%s", locked.meeting_id)
+        message = exc.message if isinstance(exc, AppError) else str(exc)
+        return fail_live_meeting(db, locked, error_message=message)
+
+    return complete_live_meeting(db, locked)

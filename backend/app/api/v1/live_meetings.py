@@ -18,8 +18,10 @@ from app.services.live_audio_transport import AudioChunk, LiveAudioBuffer
 from app.services.live_meeting_service import (
     build_session_read,
     fail_live_meeting,
+    finalize_live_meeting,
     get_live_session_read,
     get_owned_live_session,
+    retry_live_meeting,
     start_live_meeting,
     stop_live_meeting,
 )
@@ -64,6 +66,22 @@ def stop(
 ) -> LiveMeetingSessionRead:
     session = get_owned_live_session(db, meeting_id, current_user)
     session = stop_live_meeting(db, session)
+    return build_session_read(db, session)
+
+
+@router.post("/{meeting_id}/retry", response_model=LiveMeetingSessionRead)
+def retry(
+    meeting_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> LiveMeetingSessionRead:
+    """Retries a failed finalization (Phase 6): resumes the shared
+    normalize/summary pipeline against the transcript already saved when the
+    session first stopped. Never re-transcribes -- live audio isn't kept
+    around to re-transcribe from.
+    """
+    session = get_owned_live_session(db, meeting_id, current_user)
+    session = retry_live_meeting(db, session)
     return build_session_read(db, session)
 
 
@@ -238,8 +256,9 @@ async def stream(
                 "live-audio ws disconnected meeting_id=%s user_id=%s code=%s buffered_chunks=%d",
                 meeting_id, user.id, exc.code, len(buffer.chunks),
             )
-            # Unexpected client drop: leave the LiveMeetingSession exactly as it
-            # is. No finalization, no state change — Phase 6 owns recovery.
+            # Unexpected client drop, not a clean {"type": "stop"}: still
+            # finalize below (in `finally`) with whatever was transcribed so
+            # far, rather than leaving the session stuck in "live" forever.
             return
         except Exception:
             logger.exception("live-audio ws error meeting_id=%s", meeting_id)
@@ -261,6 +280,26 @@ async def stream(
             await sender_task
         except Exception:
             logger.exception("live-audio ws sender task ended with an error meeting_id=%s", meeting_id)
+
+        # Phase 6: finalize regardless of how we got here -- persist the
+        # merged transcript this pipeline committed and run the shared
+        # normalize/summary pipeline, so the session never gets stuck in
+        # "live"/"stopping". Idempotent (a fatal-error path above may have
+        # already failed the session; a session already terminal is a
+        # no-op) and best-effort here -- a failure only logs, it must never
+        # prevent the WebSocket itself from closing cleanly below.
+        #
+        # `finalize_live_meeting` is synchronous (DB writes, normalization,
+        # and an OpenAI summary call) -- run it in a worker thread so it
+        # can't block this event loop and stall every other connection's
+        # audio/ack traffic for the duration (mirrors the `asyncio.to_thread`
+        # pattern already used for transcription in `live_worker.py`).
+        try:
+            await asyncio.to_thread(
+                finalize_live_meeting, db, session, pipeline.get_transcript_segments()
+            )
+        except Exception:
+            logger.exception("live-audio ws finalization failed meeting_id=%s", meeting_id)
 
     if not client_disconnected:
         try:

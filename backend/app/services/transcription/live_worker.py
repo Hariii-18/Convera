@@ -140,7 +140,14 @@ class LiveTranscriptionWorker:
             args=(self._request_queue, self._result_queue, model_size, device, compute_type),
             daemon=True,
         )
-        self._process.start()
+        # `Process.start()` forks+execs a fresh interpreter and (per CPython's
+        # spawn bootstrap) re-imports this process's __main__ module before
+        # calling the target -- under `uvicorn ... --reload` that reimport
+        # pulls in the whole FastAPI app, easily 1-3s. Run synchronously on
+        # the asyncio loop, that stalls WebSocket receive/send for the same
+        # span (see `stop()`'s `terminate_process` for the established
+        # to_thread pattern this mirrors).
+        await asyncio.to_thread(self._process.start)
         logger.info("live-transcription worker process started pid=%s", self._process.pid)
 
         self._ready_future = self._loop.create_future()
@@ -219,7 +226,11 @@ class LiveTranscriptionWorker:
         self._pending[job_id] = future
 
         assert self._request_queue is not None
-        self._request_queue.put((job_id, audio))
+        # `mp.Queue.put()` pickles `audio` on the calling thread and can
+        # block outright once the queue is at `_REQUEST_QUEUE_MAXSIZE` --
+        # either way it must never run inline on the asyncio loop (same
+        # reasoning as `start()` above).
+        await asyncio.to_thread(self._request_queue.put, (job_id, audio))
         try:
             raw_segments = await asyncio.wait_for(future, timeout=WINDOW_TRANSCRIBE_TIMEOUT_SECONDS)
         finally:

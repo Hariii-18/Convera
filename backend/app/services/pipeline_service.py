@@ -4,7 +4,11 @@ Runs the downstream steps common to every transcript, regardless of how it
 was produced (a recorded-upload transcript today; a finalized Live Meeting
 transcript in a later phase):
 
-    Final Transcript -> Normalize -> OpenAI Summary -> Completed
+    Final Transcript -> Normalize (optional) -> OpenAI Summary -> Completed
+
+Normalization is an enhancement, not a prerequisite: if it fails, the
+pipeline falls back to the raw transcript and still runs Summary, so a
+transcript+summary can complete even when normalization never succeeds.
 
 Translation is intentionally never triggered here — it stays a separate,
 explicitly user-initiated action (`translation_service.generate_translated_transcript`,
@@ -81,7 +85,22 @@ def run_post_transcription_pipeline(
     if transcript.normalized_at is None:
         report(_STAGE_NORMALIZING, 93)
         logger.info("Pipeline: normalizing transcript for meeting %s", meeting_id)
-        generate_normalized_transcript(db, meeting_id)
+        try:
+            generate_normalized_transcript(db, meeting_id)
+        except AppError as exc:
+            # Normalization is an optional enhancement, not a prerequisite for
+            # a summary: the raw transcript is always a valid summary input
+            # (see `summary_service.generate_summary`'s fallback), so a
+            # normalization failure must never block Summary or fail the
+            # whole pipeline. `normalized_at` is left unset, which is itself
+            # the retry marker -- the next call to this function (a job/live
+            # session retry, or simply re-running the pipeline) will attempt
+            # normalization again rather than skipping it.
+            logger.warning(
+                "Pipeline: normalization failed for meeting %s, continuing to summary "
+                "with the raw transcript (retryable): %s",
+                meeting_id, exc.message,
+            )
     else:
         logger.info("Pipeline: transcript for meeting %s already normalized, skipping", meeting_id)
 
