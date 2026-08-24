@@ -20,6 +20,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Meeting Notes export (`GET /meeting-notes/{id}/export`) puts the
+    # generated filename in `Content-Disposition`; browsers hide that header
+    # from JS by default, so the frontend can't name the downloaded file
+    # without this.
+    expose_headers=["Content-Disposition"],
 )
 
 register_exception_handlers(app)

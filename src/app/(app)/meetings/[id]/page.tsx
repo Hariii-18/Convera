@@ -2,11 +2,12 @@
 
 import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { SearchX } from "lucide-react";
+import { FileWarning, SearchX } from "lucide-react";
 import { toast } from "sonner";
 
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
 import { MeetingInfoPanel } from "@/components/meetings/info-panel/meeting-info-panel";
+import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
 import { MeetingOverview } from "@/components/meetings/overview/meeting-overview";
 import { SummaryViewer } from "@/components/meetings/summary/summary-viewer";
 import { TimelineViewer } from "@/components/meetings/timeline/timeline-viewer";
@@ -38,6 +39,11 @@ import { TRANSLATION_LANGUAGES } from "@/features/transcripts/types";
 import type { TranslationLanguage } from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
+import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
+import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
+import { useExportMeetingNotes } from "@/features/meeting-notes/hooks/use-export-meeting-notes";
+import { toMeetingNotesUpdateRequest } from "@/features/meeting-notes/mappers";
+import type { MeetingNotesExportFormat } from "@/features/meeting-notes/types";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
@@ -85,6 +91,20 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     jobStatus: processingJob?.status ?? null,
   });
   const regenerateSummary = useRegenerateSummary(id);
+
+  const {
+    data: meetingNotes,
+    isLoading: isMeetingNotesLoading,
+    isError: isMeetingNotesError,
+  } = useMeetingNotes(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
+  const updateMeetingNotes = useUpdateMeetingNotes(id);
+  const exportMeetingNotes = useExportMeetingNotes(id);
+  const [meetingNotesEditMode, setMeetingNotesEditMode] = useState(false);
+  const [meetingNotesExportFormat, setMeetingNotesExportFormat] =
+    useState<MeetingNotesExportFormat>("pdf");
 
   const activity = useMemo<ActivityItem[]>(() => {
     if (!meeting) return [];
@@ -402,6 +422,65 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               )
             }
           />
+        )}
+
+        {activeTab === "notes" && (
+          isMeetingNotesError ? (
+            <EmptyState
+              icon={<FileWarning />}
+              title="Couldn't load meeting notes"
+              description="Something went wrong fetching meeting notes. Try refreshing the page."
+            />
+          ) : (
+            <MeetingNotesViewer
+              title={meeting.title}
+              dateTimeIst={meetingNotes?.dateTimeIst}
+              durationSeconds={meetingNotes?.durationSeconds ?? meeting.durationSeconds}
+              executiveSummary={meetingNotes?.executiveSummary}
+              discussionTopics={meetingNotes?.discussionTopics}
+              decisions={meetingNotes?.decisions}
+              actionItems={meetingNotes?.actionItems}
+              risks={meetingNotes?.risks}
+              openQuestions={meetingNotes?.openQuestions}
+              nextSteps={meetingNotes?.nextSteps}
+              detailedDiscussion={meetingNotes?.detailedDiscussion}
+              timestampedDiscussion={meetingNotes?.timestampedDiscussion}
+              fullTranscript={meetingNotes?.fullTranscript}
+              loading={isGuest ? false : isMeetingNotesLoading}
+              onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
+              onCopy={() => toast("Meeting notes copied")}
+              onCopyTranscript={() => toast("Transcript copied")}
+              editMode={isGuest ? false : meetingNotesEditMode}
+              onEditModeChange={
+                isGuest || !meetingNotes
+                  ? undefined
+                  : (editMode) =>
+                      guard("manage-meeting", () => setMeetingNotesEditMode(editMode))
+              }
+              saving={updateMeetingNotes.isPending}
+              onSave={(draft) =>
+                updateMeetingNotes.mutate(toMeetingNotesUpdateRequest(draft), {
+                  onSuccess: () => {
+                    setMeetingNotesEditMode(false);
+                    toast.success("Meeting notes saved");
+                  },
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                })
+              }
+              exportFormat={isGuest || !meetingNotes ? undefined : meetingNotesExportFormat}
+              onExportFormatChange={setMeetingNotesExportFormat}
+              downloading={exportMeetingNotes.isPending}
+              onDownload={() =>
+                exportMeetingNotes.mutate(meetingNotesExportFormat, {
+                  onSuccess: (format) => toast.success(`${format.toUpperCase()} downloaded`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                })
+              }
+              onSendEmail={() => toast("Email delivery is coming soon")}
+            />
+          )
         )}
 
         {activeTab === "timeline" && (

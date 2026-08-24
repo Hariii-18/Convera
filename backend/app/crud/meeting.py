@@ -42,6 +42,15 @@ def get_meeting(db: Session, meeting_id: uuid.UUID, user_id: int) -> Meeting | N
     )
 
 
+def get_meeting_by_id(db: Session, meeting_id: uuid.UUID) -> Meeting | None:
+    """Unfiltered by `user_id` — for internal call sites that already run in
+    a trusted context (e.g. the post-transcription pipeline, which only ever
+    has a `meeting_id`). Never expose this behind an API endpoint; use
+    `get_meeting` there so ownership is enforced.
+    """
+    return db.query(Meeting).filter(Meeting.id == meeting_id, Meeting.deleted_at.is_(None)).first()
+
+
 def update_meeting(db: Session, meeting: Meeting, meeting_in: MeetingUpdate) -> Meeting:
     if meeting_in.title is not None:
         meeting.title = meeting_in.title

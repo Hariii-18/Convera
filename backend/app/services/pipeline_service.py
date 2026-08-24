@@ -33,6 +33,7 @@ from app.core.exceptions import AppError
 from app.crud.summary import get_summary_by_meeting_id
 from app.crud.transcript import get_transcript_by_meeting_id
 from app.models.summary import Summary
+from app.services.meeting_notes_service import ensure_meeting_notes
 from app.services.normalization_service import generate_normalized_transcript
 from app.services.summary_service import generate_summary
 
@@ -107,8 +108,15 @@ def run_post_transcription_pipeline(
     existing_summary = get_summary_by_meeting_id(db, meeting_id)
     if existing_summary is not None:
         logger.info("Pipeline: summary already exists for meeting %s, skipping", meeting_id)
+        # Still ensure Meeting Notes exists (e.g. a meeting summarized before
+        # this table existed) - a no-op if it's already there, and it must
+        # never re-derive over a user's saved edits either way. See
+        # `ensure_meeting_notes`.
+        ensure_meeting_notes(db, meeting_id)
         return existing_summary
 
     report(_STAGE_SUMMARIZING, 96)
     logger.info("Pipeline: generating summary for meeting %s", meeting_id)
-    return generate_summary(db, meeting_id)
+    summary = generate_summary(db, meeting_id)
+    ensure_meeting_notes(db, meeting_id)
+    return summary

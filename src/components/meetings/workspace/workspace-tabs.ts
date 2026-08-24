@@ -3,6 +3,7 @@ import {
   Download,
   FileText,
   History,
+  NotebookText,
   Sparkles,
   type LucideIcon,
 } from "lucide-react";
@@ -15,6 +16,7 @@ export type WorkspaceTabValue =
   | "overview"
   | "transcript"
   | "summary"
+  | "notes"
   | "timeline"
   | "downloads";
 
@@ -28,6 +30,7 @@ export const workspaceTabs: WorkspaceTab[] = [
   { value: "overview", label: "Overview", icon: ClipboardList },
   { value: "transcript", label: "Transcript", icon: FileText },
   { value: "summary", label: "Summary", icon: Sparkles },
+  { value: "notes", label: "Meeting Notes", icon: NotebookText },
   { value: "timeline", label: "Timeline", icon: History },
   { value: "downloads", label: "Downloads", icon: Download },
 ];
