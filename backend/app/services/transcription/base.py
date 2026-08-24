@@ -87,6 +87,49 @@ def _alpha_ratio(text: str) -> float:
     return sum(1 for ch in stripped if ch.isalpha()) / len(stripped)
 
 
+def _low_confidence_signal(
+    avg_logprob: float | None,
+    no_speech_prob: float | None,
+    compression_ratio: float | None,
+) -> bool:
+    """Shared core of the compression-ratio / logprob / no-speech-prob check,
+    usable both on a whole-result aggregate (`is_unusable_transcription`) and
+    on a single segment (`is_unusable_segment`) -- same thresholds either way.
+    """
+    if compression_ratio is not None and compression_ratio > _MAX_AVG_COMPRESSION_RATIO:
+        return True
+    if (
+        avg_logprob is not None
+        and no_speech_prob is not None
+        and avg_logprob < _MIN_AVG_LOGPROB
+        and no_speech_prob > _MAX_AVG_NO_SPEECH_PROB
+    ):
+        return True
+    return False
+
+
+def is_unusable_segment(
+    text: str,
+    *,
+    avg_logprob: float | None,
+    no_speech_prob: float | None,
+    compression_ratio: float | None,
+) -> bool:
+    """Single-segment counterpart of `is_unusable_transcription`, for callers
+    (the live meeting worker) that need to drop individual hallucinated/
+    background-noise segments from a stream rather than judge one aggregated
+    result. Same heuristics, same thresholds -- see that function's docstring.
+    """
+    text = text.strip()
+    if not text:
+        return True
+    if _dominant_char_ratio(text) > _MAX_DOMINANT_CHAR_RATIO:
+        return True
+    if _alpha_ratio(text) < _MIN_ALPHA_RATIO:
+        return True
+    return _low_confidence_signal(avg_logprob, no_speech_prob, compression_ratio)
+
+
 def is_unusable_transcription(result: TranscriptionResult) -> bool:
     """True when a transcription result is unusable and should not be treated
     as a successful pass — either empty, or (non-empty but) garbage/hallucinated:
@@ -115,14 +158,4 @@ def is_unusable_transcription(result: TranscriptionResult) -> bool:
         return True
     if _alpha_ratio(text) < _MIN_ALPHA_RATIO:
         return True
-    if result.compression_ratio is not None and result.compression_ratio > _MAX_AVG_COMPRESSION_RATIO:
-        return True
-    if (
-        result.avg_logprob is not None
-        and result.no_speech_prob is not None
-        and result.avg_logprob < _MIN_AVG_LOGPROB
-        and result.no_speech_prob > _MAX_AVG_NO_SPEECH_PROB
-    ):
-        return True
-
-    return False
+    return _low_confidence_signal(result.avg_logprob, result.no_speech_prob, result.compression_ratio)

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
+from app.models.summary import Summary
 from app.models.transcript import Transcript
 
 
@@ -26,9 +27,20 @@ def upsert_transcript(
     A meeting has at most one transcript, so a retried processing job
     (re-transcribing the same meeting) overwrites the prior result rather
     than leaving a stale row behind.
+
+    When this call *replaces* content that was already there (reprocessing
+    a meeting that already had a transcript), any summary already generated
+    was derived from that prior content and no longer describes the new
+    transcript. It's deleted here, in the same transaction as the transcript
+    update, so a crash or failure anywhere downstream (normalization,
+    summary generation) can never leave the old summary looking valid for
+    the new transcript — the DB commit that updates the transcript is the
+    same commit that removes it. `run_post_transcription_pipeline`'s
+    "summary already exists, skip" check then naturally regenerates it.
     """
     existing = get_transcript_by_meeting_id(db, meeting_id)
     if existing is not None:
+        db.query(Summary).filter(Summary.meeting_id == meeting_id).delete()
         existing.upload_id = upload_id
         existing.language = language
         existing.transcript = transcript

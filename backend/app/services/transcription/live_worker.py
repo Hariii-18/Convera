@@ -12,11 +12,20 @@ when the live session's WebSocket connects and terminated (via the same
 `terminate_process` escalation used for recorded jobs) the moment the
 session stops, fails, or the socket drops.
 
-Live Meeting V1 is English-only (see module docstring in
-`app.services.transcription.faster_whisper` for why the recorded-upload path
-uses `multilingual=True` instead -- that behavior is intentionally not
-reused here): `language="en"` is passed explicitly rather than leaving
-language auto-detection/multilingual switching enabled.
+Live Meeting V1 is English-only, but forcing `language="en"` on every window
+turned out to actively cause hallucination: pinning the language makes
+Whisper decode *something* in English even for silence, background noise, or
+background non-English speech (e.g. Telugu) instead of recognizing the audio
+isn't English speech at all. So the language is left to be auto-detected per
+window (like the recorded-upload path's `multilingual=True`, see
+`app.services.transcription.faster_whisper`), and English-only is enforced
+downstream instead: a window whose detected language isn't English is
+dropped in full, and every individual segment is additionally screened with
+`is_unusable_segment` (same compression-ratio / avg-logprob / no-speech-prob
+hallucination heuristics already used on the recorded-upload path) before
+being sent to the client. Whisper's own no-speech gating (`vad_filter=True`
+plus its default `no_speech_threshold`) is left enabled rather than
+disabled, so this is on top of -- not a replacement for -- that gating.
 """
 
 from __future__ import annotations
@@ -26,11 +35,10 @@ import logging
 import multiprocessing as mp
 import threading
 import traceback
-from multiprocessing.connection import Connection
 
 import numpy as np
 
-from app.services.transcription.base import TranscriptSegment
+from app.services.transcription.base import TranscriptSegment, is_unusable_segment
 from app.services.transcription.process_utils import terminate_process
 
 logger = logging.getLogger("converra")
@@ -90,21 +98,44 @@ def _worker_entrypoint(
         job_id, audio = job
         try:
             # Same proven settings as the recorded-upload base pass (see
-            # `faster_whisper.py`), minus `multilingual=True` -- Live
-            # Meeting V1 is English-only, so the language is pinned instead
-            # of re-detected per window.
-            segments_iter, _info = model.transcribe(
+            # `faster_whisper.py`), including leaving `language` unset so
+            # Whisper auto-detects it per window instead of being forced to
+            # decode everything as English (that forcing was the source of
+            # hallucinated English text on non-English/background audio).
+            # `vad_parameters`/`no_speech_threshold` are the same values
+            # tuned on the recorded-upload path: a lower VAD threshold
+            # (0.35 vs faster-whisper's 0.5 default) keeps quiet/slow speech
+            # from being clipped as silence, and a lower no-speech threshold
+            # (0.4 vs the 0.6 default) makes it easier for Whisper's own
+            # gating to flag background-noise/non-speech windows instead of
+            # decoding a hallucinated guess for them.
+            segments_iter, info = model.transcribe(
                 audio,
                 task="transcribe",
-                language="en",
                 beam_size=1,
                 vad_filter=True,
+                vad_parameters=dict(threshold=0.35),
+                no_speech_threshold=0.4,
                 condition_on_previous_text=False,
             )
+
+            if info.language != "en":
+                # Live Meeting V1 is English-only: a window Whisper itself
+                # detected as non-English (background Telugu speech, etc.)
+                # is dropped in full rather than risk emitting whatever
+                # English-shaped text decoding it anyway would produce.
+                result_queue.put((job_id, "ok", []))
+                continue
+
             segments = [
-                (segment.start, segment.end, segment.text)
+                (segment.start, segment.end, segment.text.strip())
                 for segment in segments_iter
-                if segment.text.strip()
+                if not is_unusable_segment(
+                    segment.text,
+                    avg_logprob=segment.avg_logprob,
+                    no_speech_prob=segment.no_speech_prob,
+                    compression_ratio=segment.compression_ratio,
+                )
             ]
             result_queue.put((job_id, "ok", segments))
         except BaseException:

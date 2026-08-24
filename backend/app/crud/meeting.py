@@ -1,9 +1,11 @@
 import uuid
 
+from fastapi import status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.meeting import Meeting
+from app.core.exceptions import AppError
+from app.models.meeting import MEETING_STATUS_TRANSITIONS, Meeting
 from app.schemas.meeting import MeetingCreate, MeetingUpdate
 
 
@@ -43,8 +45,27 @@ def get_meeting(db: Session, meeting_id: uuid.UUID, user_id: int) -> Meeting | N
 def update_meeting(db: Session, meeting: Meeting, meeting_in: MeetingUpdate) -> Meeting:
     if meeting_in.title is not None:
         meeting.title = meeting_in.title
-    if meeting_in.status is not None:
-        meeting.status = meeting_in.status
+    db.commit()
+    db.refresh(meeting)
+    return meeting
+
+
+def update_meeting_status(db: Session, meeting: Meeting, new_status: str) -> Meeting:
+    """Internal-only status transition, used by the processing/live-meeting
+    lifecycle services (never by the public PATCH endpoint - see
+    `MeetingUpdate`). Enforces `MEETING_STATUS_TRANSITIONS` so a bug in a
+    caller can't silently move a meeting through an edge that no legitimate
+    flow produces.
+    """
+    if new_status == meeting.status:
+        return meeting
+    allowed = MEETING_STATUS_TRANSITIONS.get(meeting.status, ())
+    if new_status not in allowed:
+        raise AppError(
+            f"Cannot transition meeting from '{meeting.status}' to '{new_status}'",
+            status.HTTP_409_CONFLICT,
+        )
+    meeting.status = new_status
     db.commit()
     db.refresh(meeting)
     return meeting

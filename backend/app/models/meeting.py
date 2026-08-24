@@ -7,6 +7,20 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
 
+# The only status transitions ever produced by the app's actual lifecycle
+# code (processing_service._sync_meeting_status): initial queueing,
+# success/failure of a processing run, retrying a failed run, and
+# reprocessing an already-completed meeting (queue_processing_job treats
+# completed/failed jobs as historical and never blocks a new one). Nothing
+# outside these edges is a legitimate transition, so PATCH /meetings/{id}
+# does not expose `status` at all - only these internal call sites drive it.
+MEETING_STATUS_TRANSITIONS: dict[str, tuple[str, ...]] = {
+    "scheduled": ("processing",),
+    "processing": ("completed", "failed"),
+    "completed": ("processing",),
+    "failed": ("processing",),
+}
+
 
 class Meeting(Base):
     __tablename__ = "meetings"

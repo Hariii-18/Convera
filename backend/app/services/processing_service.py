@@ -5,12 +5,14 @@ from collections.abc import Callable
 from dataclasses import asdict
 
 from fastapi import status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
-from app.crud.meeting import get_meeting, update_meeting
+from app.crud.meeting import get_meeting, update_meeting_status
 from app.crud.processing_job import (
     create_processing_job,
+    get_active_processing_job_for_upload,
     get_processing_job_by_id,
     mark_job_completed,
     mark_job_failed,
@@ -24,7 +26,6 @@ from app.db.session import SessionLocal
 from app.models.processing_job import ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
-from app.schemas.meeting import MeetingUpdate
 from app.services.pipeline_service import run_post_transcription_pipeline
 from app.services.transcription.base import is_unusable_transcription
 from app.workers.processor import (
@@ -40,7 +41,7 @@ logger = logging.getLogger("converra")
 def _sync_meeting_status(db: Session, meeting_id: uuid.UUID, user_id: int, meeting_status: str) -> None:
     meeting = get_meeting(db, meeting_id, user_id)
     if meeting is not None:
-        update_meeting(db, meeting, MeetingUpdate(status=meeting_status))
+        update_meeting_status(db, meeting, meeting_status)
 
 
 class _JobCancelled(Exception):
@@ -71,6 +72,17 @@ def queue_processing_job(db: Session, *, upload: Upload, user: User) -> Processi
 
     Shared by the automatic upload-completion flow and the manual `POST /process`
     endpoint so both go through identical validation and side effects.
+
+    Idempotent per upload: if an active job (queued/preparing/processing)
+    already exists for this upload, that job is returned instead of creating
+    a duplicate - covering repeated requests, double-clicks, and retried
+    client calls. Concurrent callers are protected by a `FOR UPDATE` lock on
+    any existing active row plus a partial unique index on
+    `processing_jobs(upload_id)` (active statuses only) that makes the
+    database itself reject a second concurrent insert; that race is caught
+    below and resolved by returning the winner's job. Completed/failed jobs
+    are historical and never block a new one, so reprocessing an upload after
+    a prior run finished still works.
     """
     if upload.meeting_id is None:
         raise AppError("Upload is not linked to a meeting", status.HTTP_400_BAD_REQUEST)
@@ -78,9 +90,21 @@ def queue_processing_job(db: Session, *, upload: Upload, user: User) -> Processi
     if get_meeting(db, upload.meeting_id, user.id) is None:
         raise AppError("Meeting not found", status.HTTP_404_NOT_FOUND)
 
-    job = create_processing_job(
-        db, upload_id=upload.id, meeting_id=upload.meeting_id, user_id=user.id
-    )
+    existing_job = get_active_processing_job_for_upload(db, upload.id)
+    if existing_job is not None:
+        return existing_job
+
+    try:
+        job = create_processing_job(
+            db, upload_id=upload.id, meeting_id=upload.meeting_id, user_id=user.id
+        )
+    except IntegrityError:
+        db.rollback()
+        existing_job = get_active_processing_job_for_upload(db, upload.id)
+        if existing_job is None:
+            raise
+        return existing_job
+
     _sync_meeting_status(db, upload.meeting_id, user.id, "processing")
     return job
 

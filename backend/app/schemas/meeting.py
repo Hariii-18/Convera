@@ -16,8 +16,16 @@ class MeetingCreate(BaseModel):
 
 
 class MeetingUpdate(BaseModel):
+    """User-facing PATCH body. `status` is deliberately not a field here -
+    it is a lifecycle-managed value (see `MEETING_STATUS_TRANSITIONS`) driven
+    only by internal processing/live-meeting flows, never by direct client
+    edits. `extra="forbid"` turns an attempt to PATCH it into a clear 422
+    instead of silently ignoring it.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
     title: str | None = Field(default=None, min_length=1, max_length=255)
-    status: MeetingStatus | None = None
 
 
 class MeetingRead(BaseModel):

@@ -204,6 +204,16 @@ class LiveTranscriptionPipeline:
             abs_end = window_start + segment.end
             if abs_end <= self._committed_until + 1e-6:
                 continue  # fully inside the overlap -- already emitted last cycle
+            if abs_start < self._committed_until - 1e-6:
+                # Straddles the commit point: re-segmentation on this cycle
+                # merged already-committed audio with new audio into one
+                # segment. Emitting it whole would duplicate the
+                # already-committed words at the boundary, and there's no
+                # word-level timing here to trim just the new part, so skip
+                # it for this cycle -- once enough new audio accrues the
+                # window will re-segment with a clean boundary and this
+                # speech will be emitted then.
+                continue
             text = segment.text.strip()
             if not text:
                 continue
@@ -239,6 +249,10 @@ class LiveTranscriptionPipeline:
             except asyncio.TimeoutError:
                 logger.warning("live-transcription drain timed out; cancelling")
                 self._task.cancel()
+                try:
+                    await self._task
+                except (asyncio.CancelledError, Exception):
+                    pass
             except Exception:
                 logger.exception("live-transcription task ended with an error during stop")
 

@@ -35,6 +35,7 @@ export const uploadsApi = {
         headers: { "Content-Type": "multipart/form-data" },
         signal: options?.signal,
         onUploadProgress: options?.onUploadProgress,
+        timeout: 0, // large files can take longer than the default request timeout
       },
     );
     return data;

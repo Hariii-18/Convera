@@ -6,9 +6,16 @@ import { useAuthStore } from "@/store/auth-store";
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
 
+// Prevents a hung/unreachable backend from leaving a request pending
+// forever (e.g. the live-meeting stop call leaving the UI stuck on
+// "Stopping…" with no feedback). File uploads override this per-request
+// since they can legitimately take longer on slow connections.
+const DEFAULT_TIMEOUT_MS = 30_000;
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: { "Content-Type": "application/json" },
+  timeout: DEFAULT_TIMEOUT_MS,
 });
 
 apiClient.interceptors.request.use((config) => {

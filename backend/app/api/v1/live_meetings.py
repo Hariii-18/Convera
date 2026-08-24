@@ -150,10 +150,19 @@ async def stream(
     )
 
     buffer = LiveAudioBuffer()
-    send_queue: asyncio.Queue[dict | None] = asyncio.Queue()
+    # Bounded so a stalled/slow client can't make this grow without limit --
+    # transcript/ack messages should drain quickly under normal conditions;
+    # hitting the cap means the socket is effectively stuck.
+    send_queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=1000)
 
     async def send(msg: dict) -> None:
-        await send_queue.put(msg)
+        try:
+            send_queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            logger.warning(
+                "live-audio send queue overloaded meeting_id=%s; dropping message type=%s",
+                meeting_id, msg.get("type"),
+            )
 
     sender_task = asyncio.create_task(_sender_loop(websocket, send_queue))
 
