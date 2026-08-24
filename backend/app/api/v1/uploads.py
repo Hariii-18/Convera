@@ -14,7 +14,6 @@ from app.crud.upload import (
     list_uploads,
     mark_upload_completed,
     mark_upload_failed,
-    soft_delete_upload,
     upload_exists_with_filename,
 )
 from app.db.session import get_db
@@ -22,7 +21,8 @@ from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.upload import UploadRead
 from app.services.processing_service import queue_processing_job
-from app.services.storage_service import StorageError, delete_file, upload_file
+from app.services.storage_service import StorageError, upload_file
+from app.services.upload_service import delete_upload_cascade
 from app.services.upload_validation import (
     build_storage_path,
     build_stored_filename,
@@ -146,10 +146,4 @@ def delete(
     current_user: User = Depends(get_current_user),
 ) -> None:
     upload = _get_owned_upload(db, upload_id, current_user)
-
-    try:
-        delete_file(upload.storage_path, bucket=upload.bucket)
-    except StorageError as exc:
-        logger.exception("Failed to delete storage object during upload deletion", exc_info=exc)
-
-    soft_delete_upload(db, upload)
+    delete_upload_cascade(db, upload)

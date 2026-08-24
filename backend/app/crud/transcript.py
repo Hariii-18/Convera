@@ -21,12 +21,20 @@ def upsert_transcript(
     segments: list[dict],
     duration: float | None,
     word_count: int,
+    produced_by_job_id: uuid.UUID | None = None,
 ) -> Transcript:
     """Creates or replaces the transcript for a meeting.
 
     A meeting has at most one transcript, so a retried processing job
     (re-transcribing the same meeting) overwrites the prior result rather
     than leaving a stale row behind.
+
+    `produced_by_job_id` records which `ProcessingJob` (if any) produced this
+    transcript content, so `execute_processing_job` can tell "retry of the
+    same job that already transcribed this" (skip re-transcription) apart
+    from "a brand-new job for an already-processed meeting" (re-transcribe).
+    It's `None` for transcripts not tied to a processing job, e.g. Live
+    Meeting finalization.
 
     When this call *replaces* content that was already there (reprocessing
     a meeting that already had a transcript), any summary already generated
@@ -47,6 +55,7 @@ def upsert_transcript(
         existing.segments = segments
         existing.duration = duration
         existing.word_count = word_count
+        existing.produced_by_job_id = produced_by_job_id
         db.commit()
         db.refresh(existing)
         return existing
@@ -59,6 +68,7 @@ def upsert_transcript(
         segments=segments,
         duration=duration,
         word_count=word_count,
+        produced_by_job_id=produced_by_job_id,
     )
     db.add(record)
     db.commit()

@@ -50,7 +50,9 @@ def update_meeting(db: Session, meeting: Meeting, meeting_in: MeetingUpdate) -> 
     return meeting
 
 
-def update_meeting_status(db: Session, meeting: Meeting, new_status: str) -> Meeting:
+def update_meeting_status(
+    db: Session, meeting: Meeting, new_status: str, *, commit: bool = True
+) -> Meeting:
     """Internal-only status transition, used by the processing/live-meeting
     lifecycle services (never by the public PATCH endpoint - see
     `MeetingUpdate`). Enforces `MEETING_STATUS_TRANSITIONS` so a bug in a
@@ -66,6 +68,9 @@ def update_meeting_status(db: Session, meeting: Meeting, new_status: str) -> Mee
             status.HTTP_409_CONFLICT,
         )
     meeting.status = new_status
+    if not commit:
+        db.flush()
+        return meeting
     db.commit()
     db.refresh(meeting)
     return meeting

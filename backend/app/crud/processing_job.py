@@ -65,6 +65,10 @@ def list_processing_jobs(
     return query.order_by(ProcessingJob.created_at.desc()).all()
 
 
+def list_processing_jobs_by_upload_id(db: Session, upload_id: uuid.UUID) -> list[ProcessingJob]:
+    return db.query(ProcessingJob).filter(ProcessingJob.upload_id == upload_id).all()
+
+
 def update_job_progress(
     db: Session,
     job: ProcessingJob,
@@ -95,23 +99,31 @@ def mark_job_started(db: Session, job: ProcessingJob, *, worker_name: str) -> Pr
     return job
 
 
-def mark_job_completed(db: Session, job: ProcessingJob) -> ProcessingJob:
+def mark_job_completed(db: Session, job: ProcessingJob, *, commit: bool = True) -> ProcessingJob:
     job.status = "completed"
     job.stage = "Completed"
     job.progress = 100
     job.completed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(job)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
     return job
 
 
-def mark_job_failed(db: Session, job: ProcessingJob, *, error_message: str) -> ProcessingJob:
+def mark_job_failed(
+    db: Session, job: ProcessingJob, *, error_message: str, commit: bool = True
+) -> ProcessingJob:
     job.status = "failed"
     job.stage = "Failed"
     job.error_message = error_message
     job.completed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(job)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
     return job
 
 

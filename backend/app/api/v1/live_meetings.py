@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, get_ws_user
 from app.crud.live_meeting_session import get_live_session
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
+from app.models.live_meeting_session import LiveMeetingSession
 from app.models.user import User
 from app.schemas.live_meeting import (
     LiveMeetingSessionRead,
@@ -85,11 +86,55 @@ def retry(
     return build_session_read(db, session)
 
 
+def _load_authorized_live_session(
+    token: str | None, meeting_id: uuid.UUID
+) -> tuple[User | None, LiveMeetingSession | None]:
+    """Short-lived session for the handshake's auth + ownership lookup only
+    -- opened, used, and closed here rather than held for the connection's
+    lifetime. Run off the event loop via `asyncio.to_thread` since it's
+    synchronous DB work (item 6).
+    """
+    db = SessionLocal()
+    try:
+        user = get_ws_user(db, token)
+        if user is None:
+            return None, None
+        session = get_live_session(db, meeting_id, user.id)
+        return user, session
+    finally:
+        db.close()
+
+
+def _fail_live_meeting_sync(session: LiveMeetingSession, error_message: str) -> None:
+    """Own short-lived session for one fatal-error state transition --
+    `fail_live_meeting` only needs `session.id` (already loaded on the
+    detached instance), so it doesn't need the session that originally
+    fetched it.
+    """
+    db = SessionLocal()
+    try:
+        fail_live_meeting(db, session, error_message=error_message)
+    finally:
+        db.close()
+
+
+def _finalize_live_meeting_sync(
+    session: LiveMeetingSession, segments: list
+) -> None:
+    """Own short-lived session for Phase 6 finalization, opened only for the
+    duration of this call rather than the whole WebSocket connection.
+    """
+    db = SessionLocal()
+    try:
+        finalize_live_meeting(db, session, segments)
+    finally:
+        db.close()
+
+
 @router.websocket("/{meeting_id}/stream")
 async def stream(
     websocket: WebSocket,
     meeting_id: uuid.UUID,
-    db: Session = Depends(get_db),
 ) -> None:
     """Phase 4 live audio transport + Phase 5 live transcription.
 
@@ -126,12 +171,11 @@ async def stream(
     handshake rather than allowed to connect and then dropped.
     """
     token = websocket.query_params.get("token")
-    user = get_ws_user(db, token)
+    user, session = await asyncio.to_thread(_load_authorized_live_session, token, meeting_id)
     if user is None:
         await websocket.close(code=WS_UNAUTHORIZED, reason="Unauthorized")
         return
 
-    session = get_live_session(db, meeting_id, user.id)
     if session is None:
         await websocket.close(code=WS_SESSION_NOT_FOUND, reason="Live session not found")
         return
@@ -174,7 +218,7 @@ async def stream(
             return
         failed_reported = True
         try:
-            fail_live_meeting(db, session, error_message=message)
+            await asyncio.to_thread(_fail_live_meeting_sync, session, message)
         except Exception:
             logger.exception(
                 "failed to transition live session to failed meeting_id=%s", meeting_id
@@ -299,13 +343,15 @@ async def stream(
         # prevent the WebSocket itself from closing cleanly below.
         #
         # `finalize_live_meeting` is synchronous (DB writes, normalization,
-        # and an OpenAI summary call) -- run it in a worker thread so it
-        # can't block this event loop and stall every other connection's
-        # audio/ack traffic for the duration (mirrors the `asyncio.to_thread`
-        # pattern already used for transcription in `live_worker.py`).
+        # and an OpenAI summary call) -- run it in a worker thread, against
+        # its own short-lived session, so it can't block this event loop and
+        # stall every other connection's audio/ack traffic for the duration,
+        # nor hold a pooled connection for the whole call (mirrors the
+        # `asyncio.to_thread` pattern already used for transcription in
+        # `live_worker.py`).
         try:
             await asyncio.to_thread(
-                finalize_live_meeting, db, session, pipeline.get_transcript_segments()
+                _finalize_live_meeting_sync, session, pipeline.get_transcript_segments()
             )
         except Exception:
             logger.exception("live-audio ws finalization failed meeting_id=%s", meeting_id)

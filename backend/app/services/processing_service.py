@@ -38,10 +38,33 @@ from app.workers.processor import (
 logger = logging.getLogger("converra")
 
 
-def _sync_meeting_status(db: Session, meeting_id: uuid.UUID, user_id: int, meeting_status: str) -> None:
+def _sync_meeting_status(
+    db: Session, meeting_id: uuid.UUID, user_id: int, meeting_status: str, *, commit: bool = True
+) -> None:
     meeting = get_meeting(db, meeting_id, user_id)
     if meeting is not None:
-        update_meeting_status(db, meeting, meeting_status)
+        update_meeting_status(db, meeting, meeting_status, commit=commit)
+
+
+def _finalize_job(
+    db: Session,
+    job: ProcessingJob,
+    *,
+    job_status: str,
+    meeting_status: str,
+    error_message: str | None = None,
+) -> None:
+    """Marks a job completed/failed and syncs its meeting's status in a
+    single commit, so a crash between the two can never leave the job row
+    showing one outcome while the meeting status is stuck on another.
+    """
+    if job_status == "completed":
+        mark_job_completed(db, job, commit=False)
+    else:
+        mark_job_failed(db, job, error_message=error_message or "", commit=False)
+    _sync_meeting_status(db, job.meeting_id, job.user_id, meeting_status, commit=False)
+    db.commit()
+    db.refresh(job)
 
 
 class _JobCancelled(Exception):
@@ -142,12 +165,17 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
         worker_name = f"whisper-worker-{job.id.hex[:8]}"
         job = mark_job_started(db, job, worker_name=worker_name)
 
-        # A transcript already existing for this meeting means a prior run of
-        # this job got all the way through transcription and only failed
-        # later (summary generation) — a retry of that job should resume
-        # from the summary step, not re-run Faster-Whisper.
+        # A transcript already existing for this meeting only means THIS job
+        # can skip re-transcribing when that transcript was produced by this
+        # very job (`produced_by_job_id` matches) — i.e. a retry of a job
+        # that got all the way through transcription and only failed later
+        # (summary generation), which should resume from the summary step
+        # rather than re-run Faster-Whisper. A brand-new ProcessingJob for an
+        # already-processed meeting (reprocessing) has a different job id, so
+        # it always re-transcribes and `upsert_transcript` replaces the
+        # stale transcript (and, atomically, the stale summary).
         existing_transcript = get_transcript_by_meeting_id(db, job.meeting_id)
-        if existing_transcript is None:
+        if existing_transcript is None or existing_transcript.produced_by_job_id != job.id:
             logger.info("[timing] job %s download_upload start", job_id)
             t0 = time.perf_counter()
             file_bytes = await download_upload(upload)
@@ -212,8 +240,10 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 logger.warning("Processing job %s low-confidence: %s", job_id, error_message)
                 job = get_processing_job_by_id(db, job_id)
                 if job is not None:
-                    mark_job_failed(db, job, error_message=error_message)
-                    _sync_meeting_status(db, job.meeting_id, job.user_id, "failed")
+                    _finalize_job(
+                        db, job, job_status="failed", meeting_status="failed",
+                        error_message=error_message,
+                    )
                 return
 
             job = get_processing_job_by_id(db, job_id)
@@ -232,6 +262,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 segments=[asdict(segment) for segment in result.segments],
                 duration=result.duration,
                 word_count=result.word_count,
+                produced_by_job_id=job.id,
             )
             logger.info("[timing] job %s save_transcript end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         else:
@@ -278,8 +309,10 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             )
             job = get_processing_job_by_id(db, job_id)
             if job is not None:
-                mark_job_failed(db, job, error_message=exc.message)
-                _sync_meeting_status(db, job.meeting_id, job.user_id, "failed")
+                _finalize_job(
+                    db, job, job_status="failed", meeting_status="failed",
+                    error_message=exc.message,
+                )
             return
         logger.info("[timing] job %s pipeline end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
@@ -289,15 +322,13 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
 
         logger.info("[timing] job %s finalization start", job_id)
         t0 = time.perf_counter()
-        mark_job_completed(db, job)
-        _sync_meeting_status(db, job.meeting_id, job.user_id, "completed")
+        _finalize_job(db, job, job_status="completed", meeting_status="completed")
         logger.info("[timing] job %s finalization end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         logger.info("Processing job %s completed for upload %s", job.id, upload.id)
     except Exception as exc:  # noqa: BLE001 (worker failure must never crash the task loop)
         logger.exception("Processing job %s failed", job_id, exc_info=exc)
         job = get_processing_job_by_id(db, job_id)
         if job is not None:
-            mark_job_failed(db, job, error_message=str(exc))
-            _sync_meeting_status(db, job.meeting_id, job.user_id, "failed")
+            _finalize_job(db, job, job_status="failed", meeting_status="failed", error_message=str(exc))
     finally:
         db.close()

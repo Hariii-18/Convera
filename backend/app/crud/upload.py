@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -88,9 +87,3 @@ def mark_upload_failed(db: Session, upload: Upload) -> Upload:
     db.commit()
     db.refresh(upload)
     return upload
-
-
-def soft_delete_upload(db: Session, upload: Upload) -> None:
-    upload.status = "deleted"
-    upload.deleted_at = datetime.now(timezone.utc)
-    db.commit()

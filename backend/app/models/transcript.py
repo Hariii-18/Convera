@@ -27,6 +27,12 @@ class Transcript(Base):
         nullable=False,
         index=True,
     )
+    produced_by_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("processing_jobs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     language: Mapped[str | None] = mapped_column(String(10), nullable=True)
     transcript: Mapped[str] = mapped_column(Text, nullable=False)
     segments: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
