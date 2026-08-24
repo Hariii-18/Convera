@@ -6,6 +6,7 @@ import type {
 export type LiveMeetingSession = {
   id: string;
   meetingId: string;
+  title: string;
   state: LiveSessionState;
   startedAt: string;
   stoppedAt: string | null;
@@ -20,6 +21,7 @@ export function toLiveMeetingSession(
   return {
     id: response.id,
     meetingId: response.meeting_id,
+    title: response.title,
     state: response.state,
     startedAt: response.started_at,
     stoppedAt: response.stopped_at,

@@ -72,6 +72,7 @@ type MeetingNotesViewerProps = React.ComponentProps<"div"> & {
   onDownload?: () => void;
   downloading?: boolean;
   onSendEmail?: () => void;
+  sendingEmail?: boolean;
 };
 
 /**
@@ -115,6 +116,7 @@ function MeetingNotesViewer({
   onDownload,
   downloading = false,
   onSendEmail,
+  sendingEmail = false,
   ...props
 }: MeetingNotesViewerProps) {
   const notesText = React.useMemo(
@@ -206,6 +208,7 @@ function MeetingNotesViewer({
           onDownload={onDownload}
           downloading={downloading}
           onSendEmail={onSendEmail}
+          sendingEmail={sendingEmail}
         />
       )}
 

@@ -24,8 +24,8 @@ type MeetingNotesExportControlProps = React.ComponentProps<"div"> & {
   onFormatChange: (format: MeetingNotesExportFormat) => void;
   onDownload?: () => void;
   downloading?: boolean;
-  /** Presentational only for this phase — SMTP delivery isn't implemented
-   * yet, so the caller just surfaces "coming soon" or similar. */
+  /** Emails the currently saved Meeting Notes (rendered to `format`) to the
+   * authenticated user's own address. Omit to hide/disable the button. */
   onSendEmail?: () => void;
   sendingEmail?: boolean;
 };
@@ -33,8 +33,8 @@ type MeetingNotesExportControlProps = React.ComponentProps<"div"> & {
 /**
  * Export control for Meeting Notes: pick a format, then Download (renders
  * the currently saved Meeting Notes server-side and saves the file) or Send
- * to Email (scaffolded for the architecture — see `onSendEmail`, delivery
- * isn't wired up yet).
+ * to Email (renders the same document server-side and emails it to the
+ * authenticated user's own address — see `onSendEmail`).
  */
 function MeetingNotesExportControl({
   className,

@@ -42,6 +42,7 @@ import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
 import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
 import { useExportMeetingNotes } from "@/features/meeting-notes/hooks/use-export-meeting-notes";
+import { useSendMeetingNotesEmail } from "@/features/meeting-notes/hooks/use-send-meeting-notes-email";
 import { toMeetingNotesUpdateRequest } from "@/features/meeting-notes/mappers";
 import type { MeetingNotesExportFormat } from "@/features/meeting-notes/types";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
@@ -102,6 +103,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   });
   const updateMeetingNotes = useUpdateMeetingNotes(id);
   const exportMeetingNotes = useExportMeetingNotes(id);
+  const sendMeetingNotesEmail = useSendMeetingNotesEmail(id);
   const [meetingNotesEditMode, setMeetingNotesEditMode] = useState(false);
   const [meetingNotesExportFormat, setMeetingNotesExportFormat] =
     useState<MeetingNotesExportFormat>("pdf");
@@ -478,7 +480,16 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                     toast.error(extractErrorMessage(mutationError)),
                 })
               }
-              onSendEmail={() => toast("Email delivery is coming soon")}
+              sendingEmail={sendMeetingNotesEmail.isPending}
+              onSendEmail={() => {
+                if (sendMeetingNotesEmail.isPending) return;
+                sendMeetingNotesEmail.mutate(meetingNotesExportFormat, {
+                  onSuccess: ({ format, recipient }) =>
+                    toast.success(`${format.toUpperCase()} emailed to ${recipient}`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                });
+              }}
             />
           )
         )}

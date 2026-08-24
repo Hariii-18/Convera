@@ -15,6 +15,7 @@ export type LiveSessionState =
 export type LiveMeetingSessionResponse = {
   id: string;
   meeting_id: string;
+  title: string;
   state: LiveSessionState;
   started_at: string;
   stopped_at: string | null;
@@ -29,5 +30,5 @@ export type LiveMeetingSessionResponse = {
 };
 
 export type LiveMeetingStartPayload = {
-  title?: string;
+  title: string;
 };

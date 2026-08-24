@@ -65,3 +65,13 @@ export type MeetingNotesUpdateRequest = {
 };
 
 export type MeetingNotesExportFormat = "pdf" | "docx" | "pptx";
+
+/** Body for `POST /meeting-notes/{meeting_id}/email`. */
+export type MeetingNotesEmailRequest = {
+  format: MeetingNotesExportFormat;
+};
+
+export type MeetingNotesEmailResponse = {
+  sent: boolean;
+  recipient: string;
+};

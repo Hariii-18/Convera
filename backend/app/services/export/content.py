@@ -8,10 +8,26 @@ pipelines: add or reorder a section here once, and every format picks it up.
 """
 
 from dataclasses import dataclass
+from typing import Any
 
 from app.schemas.meeting_notes import MeetingNotesRead
 
 _LONG_FORM_SECTIONS = {"Executive Summary", "Full Transcript"}
+
+# Stable semantic identifiers, independent of `heading` text (which can carry
+# a count suffix, e.g. "Action Items (3)"). PdfExporter/DocxExporter never
+# read this - they keep rendering from `heading`/`lines`/`is_long_form`
+# exactly as before - it exists purely so PptxExporter can pick a
+# deterministic icon/layout per section without parsing `heading`.
+SECTION_SUMMARY = "summary"
+SECTION_DISCUSSION = "discussion"
+SECTION_DECISIONS = "decisions"
+SECTION_ACTIONS = "actions"
+SECTION_RISKS = "risks"
+SECTION_QUESTIONS = "questions"
+SECTION_NEXT_STEPS = "next_steps"
+SECTION_TIMELINE = "timeline"
+SECTION_TRANSCRIPT = "transcript"
 
 
 @dataclass
@@ -21,6 +37,13 @@ class ExportSection:
     # for `_LONG_FORM_SECTIONS` there is exactly one line of free-form prose
     # (paragraph breaks as "\n"), rendered as running text instead of a list.
     lines: list[str]
+    kind: str = SECTION_DISCUSSION
+    # Optional structured payload, populated only for sections whose bullets
+    # come from multi-field records (discussion topics, action items) so a
+    # richer renderer (PptxExporter) can lay out fields separately instead of
+    # re-parsing the flattened `lines` strings. PdfExporter/DocxExporter never
+    # read this field.
+    items: list[dict[str, Any]] | None = None
 
     @property
     def is_long_form(self) -> bool:
@@ -81,7 +104,9 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
     sections: list[ExportSection] = []
 
     if notes.executive_summary:
-        sections.append(ExportSection("Executive Summary", [notes.executive_summary]))
+        sections.append(
+            ExportSection("Executive Summary", [notes.executive_summary], kind=SECTION_SUMMARY)
+        )
 
     if notes.discussion_topics:
         sections.append(
@@ -91,30 +116,61 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
                     f"{topic.title}: {topic.description}" if topic.description else topic.title
                     for topic in notes.discussion_topics
                 ],
+                kind=SECTION_DISCUSSION,
+                items=[
+                    {"title": topic.title, "description": topic.description}
+                    for topic in notes.discussion_topics
+                ],
             )
         )
 
     if notes.decisions:
-        sections.append(ExportSection("Decisions", [item.text for item in notes.decisions]))
+        sections.append(
+            ExportSection(
+                "Decisions", [item.text for item in notes.decisions], kind=SECTION_DECISIONS
+            )
+        )
 
     if notes.action_items:
         sections.append(
             ExportSection(
                 f"Action Items ({len(notes.action_items)})",
                 [_action_item_line(item) for item in notes.action_items],
+                kind=SECTION_ACTIONS,
+                items=[
+                    {
+                        "text": item.text,
+                        "owner": item.owner,
+                        "due_date": item.due_date,
+                        "status": item.status,
+                    }
+                    for item in notes.action_items
+                ],
             )
         )
 
     if notes.risks:
-        sections.append(ExportSection("Risks / Blockers", [item.text for item in notes.risks]))
+        sections.append(
+            ExportSection(
+                "Risks / Blockers", [item.text for item in notes.risks], kind=SECTION_RISKS
+            )
+        )
 
     if notes.open_questions:
         sections.append(
-            ExportSection("Open Questions", [item.text for item in notes.open_questions])
+            ExportSection(
+                "Open Questions",
+                [item.text for item in notes.open_questions],
+                kind=SECTION_QUESTIONS,
+            )
         )
 
     if notes.next_steps:
-        sections.append(ExportSection("Next Steps", [item.text for item in notes.next_steps]))
+        sections.append(
+            ExportSection(
+                "Next Steps", [item.text for item in notes.next_steps], kind=SECTION_NEXT_STEPS
+            )
+        )
 
     if notes.timestamped_discussion:
         sections.append(
@@ -124,11 +180,21 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
                     f"[{format_segment_timestamp(segment.start)}] {segment.text}"
                     for segment in notes.timestamped_discussion
                 ],
+                kind=SECTION_TIMELINE,
+                items=[
+                    {
+                        "timestamp": format_segment_timestamp(segment.start),
+                        "text": segment.text,
+                    }
+                    for segment in notes.timestamped_discussion
+                ],
             )
         )
 
     if notes.full_transcript:
-        sections.append(ExportSection("Full Transcript", [notes.full_transcript]))
+        sections.append(
+            ExportSection("Full Transcript", [notes.full_transcript], kind=SECTION_TRANSCRIPT)
+        )
 
     participants_label = (
         f"{notes.participants_count} participant{'s' if notes.participants_count != 1 else ''}"

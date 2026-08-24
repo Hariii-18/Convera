@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -80,3 +81,12 @@ class MeetingNotesUpdate(BaseModel):
     open_questions: list[SummaryTextItemRead] | None = None
     next_steps: list[SummaryTextItemRead] | None = None
     timestamped_discussion: list[TranscriptSegmentRead] | None = None
+
+
+class MeetingNotesEmailRequest(BaseModel):
+    format: Literal["pdf", "docx", "pptx"]
+
+
+class MeetingNotesEmailResponse(BaseModel):
+    sent: bool
+    recipient: str

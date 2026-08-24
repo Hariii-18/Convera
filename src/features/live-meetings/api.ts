@@ -6,7 +6,7 @@ import type {
 
 export const liveMeetingsApi = {
   async start(
-    payload?: LiveMeetingStartPayload,
+    payload: LiveMeetingStartPayload,
   ): Promise<LiveMeetingSessionResponse> {
     const { data } = await apiClient.post<LiveMeetingSessionResponse>(
       "/live-meetings/start",

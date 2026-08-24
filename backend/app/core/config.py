@@ -63,6 +63,13 @@ class Settings(BaseSettings):
     normalization_ai_provider: str = "openai"
     openai_normalization_model: str = "gpt-4.1"
 
+    # Resend (https://resend.com) is used to email Meeting Notes exports —
+    # see `app.services.email.resend_provider`. `resend_from_email` must be a
+    # verified sender/domain in the Resend account.
+    resend_api_key: str = ""
+    resend_from_email: str = ""
+    resend_request_timeout_seconds: float = 30.0
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

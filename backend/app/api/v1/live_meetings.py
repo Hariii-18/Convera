@@ -42,11 +42,11 @@ WS_SESSION_NOT_LIVE = 4409
 
 @router.post("/start", response_model=LiveMeetingSessionRead, status_code=status.HTTP_201_CREATED)
 def start(
-    body: LiveMeetingStartRequest | None = None,
+    body: LiveMeetingStartRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> LiveMeetingSessionRead:
-    session = start_live_meeting(db, current_user, title=body.title if body else None)
+    session = start_live_meeting(db, current_user, title=body.title)
     return build_session_read(db, session)
 
 

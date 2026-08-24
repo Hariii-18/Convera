@@ -36,7 +36,7 @@ from app.crud.live_meeting_session import (
     get_live_session,
     lock_live_session,
 )
-from app.crud.meeting import create_meeting
+from app.crud.meeting import create_meeting, get_meeting_by_id
 from app.crud.processing_job import list_processing_jobs
 from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
 from app.crud.upload import create_upload, list_uploads_by_meeting_id
@@ -97,12 +97,19 @@ def _transition(
     return locked
 
 
-def start_live_meeting(db: Session, user: User, *, title: str | None = None) -> LiveMeetingSession:
+def start_live_meeting(db: Session, user: User, *, title: str) -> LiveMeetingSession:
     """Starts a Live Meeting session, creating its backing Meeting record.
+
+    `title` is the user-provided meeting name — required, and already
+    trimmed/validated non-empty by `LiveMeetingStartRequest`. Every new Live
+    Meeting is created with it; there is no auto-generated fallback for new
+    sessions (meetings created before this requirement keep whatever
+    auto-generated title they already have — this only governs new starts).
 
     Idempotent against duplicate starts: if the user already has an active
     (live/stopping/finalizing) session, that same session is returned
-    instead of creating a second one. A unique partial index on
+    instead of creating a second one (the given `title` is ignored in that
+    case, same as every other field here). A unique partial index on
     `live_meeting_sessions` backs this at the database level too, so two
     concurrent start requests can't both slip past the check above and
     create two active sessions.
@@ -111,11 +118,10 @@ def start_live_meeting(db: Session, user: User, *, title: str | None = None) -> 
     if existing is not None:
         return existing
 
-    meeting_title = title or f"Live Meeting - {datetime.now(timezone.utc):%b %d, %Y %H:%M}"
     meeting = create_meeting(
         db,
         user.id,
-        MeetingCreate(title=meeting_title, source_type="live-browser-meeting"),
+        MeetingCreate(title=title, source_type="live-browser-meeting"),
     )
 
     try:
@@ -134,6 +140,7 @@ def get_live_session_read(db: Session, meeting_id: uuid.UUID, user: User) -> Liv
 
 
 def build_session_read(db: Session, session: LiveMeetingSession) -> LiveMeetingSessionRead:
+    meeting = get_meeting_by_id(db, session.meeting_id)
     transcript = get_transcript_by_meeting_id(db, session.meeting_id)
     jobs = list_processing_jobs(db, session.user_id, meeting_id=session.meeting_id)
     latest_job = jobs[0] if jobs else None
@@ -145,6 +152,7 @@ def build_session_read(db: Session, session: LiveMeetingSession) -> LiveMeetingS
     return LiveMeetingSessionRead(
         id=session.id,
         meeting_id=session.meeting_id,
+        title=meeting.title if meeting is not None else "",
         state=session.state,
         started_at=session.started_at,
         stopped_at=session.stopped_at,

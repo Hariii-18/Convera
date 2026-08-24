@@ -7,8 +7,14 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.meeting_notes import MeetingNotesRead, MeetingNotesUpdate
+from app.schemas.meeting_notes import (
+    MeetingNotesEmailRequest,
+    MeetingNotesEmailResponse,
+    MeetingNotesRead,
+    MeetingNotesUpdate,
+)
 from app.services.export.export_service import export_meeting_notes
+from app.services.meeting_notes_email_service import send_meeting_notes_email
 from app.services.meeting_notes_service import get_meeting_notes, update_meeting_notes
 
 router = APIRouter(prefix="/meeting-notes", tags=["meeting-notes"])
@@ -48,3 +54,14 @@ def export(
         media_type=content_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{meeting_id}/email", response_model=MeetingNotesEmailResponse)
+def email(
+    meeting_id: uuid.UUID,
+    body: MeetingNotesEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MeetingNotesEmailResponse:
+    recipient = send_meeting_notes_email(db, meeting_id, current_user, body.format)
+    return MeetingNotesEmailResponse(sent=True, recipient=recipient)

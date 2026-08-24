@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
+import { MeetingTitleInput } from "@/components/meetings/meeting-title-input";
 import { formatBytes } from "@/components/meetings/format";
 import { formatElapsed } from "@/components/processing/format";
 import { extractErrorMessage } from "@/features/auth/error";
@@ -57,6 +58,9 @@ function LiveCapturePanel() {
 
   const [sessionPhase, setSessionPhase] = React.useState<SessionPhase>("idle");
   const [meetingId, setMeetingId] = React.useState<string | null>(null);
+  const [meetingTitle, setMeetingTitle] = React.useState<string | null>(null);
+  const [title, setTitle] = React.useState("");
+  const [titleError, setTitleError] = React.useState<string | null>(null);
   const [mutationErrorMessage, setMutationErrorMessage] = React.useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = React.useState(0);
   const captureStartRef = React.useRef<number | null>(null);
@@ -119,9 +123,20 @@ function LiveCapturePanel() {
   // tries again) rather than leaving Start permanently disabled.
   const isStartDisabled = phase === "starting" || phase === "live" || phase === "stopping" || phase === "stopped";
   const canStop = phase === "live" || phase === "error";
+  // Title is only ever collected before a session exists — once one has
+  // started, it's already been sent and further edits here wouldn't do
+  // anything, so lock the field alongside the Start action.
+  const isTitleLocked = isStartDisabled;
 
   async function handleStart() {
     if (isStartDisabled) return; // guards a duplicate session/recorder from a double click
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setTitleError("Enter a meeting title");
+      return;
+    }
+    setTitleError(null);
 
     setSessionPhase("starting");
     setMutationErrorMessage(null);
@@ -130,8 +145,9 @@ function LiveCapturePanel() {
 
     let session: Awaited<ReturnType<typeof startMutation.mutateAsync>>;
     try {
-      session = await startMutation.mutateAsync(undefined);
+      session = await startMutation.mutateAsync(trimmedTitle);
       setMeetingId(session.meetingId);
+      setMeetingTitle(session.title);
     } catch (err) {
       const message = extractErrorMessage(err);
       setMutationErrorMessage(message);
@@ -209,7 +225,7 @@ function LiveCapturePanel() {
             </div>
             <div className="flex flex-col">
               <span className="text-sm font-medium text-foreground">
-                {isMicActive ? "Microphone capturing" : "Live Meeting"}
+                {meetingTitle ?? (isMicActive ? "Microphone capturing" : "Live Meeting")}
               </span>
               <span className="text-xs text-muted-foreground">
                 {capture.state === "requesting_permission"
@@ -220,6 +236,17 @@ function LiveCapturePanel() {
           </div>
           <StatusBadge status={statusConfig.status}>{statusConfig.label}</StatusBadge>
         </div>
+
+        <MeetingTitleInput
+          value={title}
+          onChange={(value) => {
+            setTitle(value);
+            if (titleError) setTitleError(null);
+          }}
+          error={titleError ?? undefined}
+          disabled={isTitleLocked}
+          autoFocus
+        />
 
         {phase === "error" && errorMessage && (
           <div className="flex items-start gap-2 rounded-lg bg-destructive/10 px-3 py-2.5 text-destructive">

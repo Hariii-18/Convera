@@ -2,6 +2,7 @@ import axios from "axios";
 
 import { apiClient } from "@/lib/api-client";
 import type {
+  MeetingNotesEmailResponse,
   MeetingNotesExportFormat,
   MeetingNotesResponse,
   MeetingNotesUpdateRequest,
@@ -70,5 +71,20 @@ export const meetingNotesApi = {
       `converra-meeting-notes.${format}`,
     );
     return { blob: response.data as Blob, filename };
+  },
+
+  /** Renders the current saved Meeting Notes to `format` and emails it to
+   * the authenticated user's own address (server-derived — this never
+   * accepts an arbitrary recipient).
+   */
+  async sendEmail(
+    meetingId: string,
+    format: MeetingNotesExportFormat,
+  ): Promise<MeetingNotesEmailResponse> {
+    const { data } = await apiClient.post<MeetingNotesEmailResponse>(
+      `/meeting-notes/${meetingId}/email`,
+      { format },
+    );
+    return data;
   },
 };
