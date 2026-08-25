@@ -12,6 +12,16 @@ from typing import Any
 
 from app.schemas.meeting_notes import MeetingNotesRead
 
+# Exact wording required on every export/email that carries the editable
+# transcript (Meeting Notes PDF/DOCX/PPTX, Conversation PDF/DOCX, and their
+# email attachments — see `conversation_content.py` for the Conversation
+# analogue, which reuses this constant so the wording can never drift
+# between the two document types).
+TRANSCRIPT_DISCLAIMER = (
+    "This editable transcript was computer generated and might contain "
+    "errors. People can also change the text after it was created."
+)
+
 _LONG_FORM_SECTIONS = {"Executive Summary", "Full Transcript"}
 
 # Stable semantic identifiers, independent of `heading` text (which can carry
@@ -58,6 +68,7 @@ class ExportDocument:
     duration_label: str | None
     participants_label: str | None
     sections: list[ExportSection]
+    disclaimer: str = TRANSCRIPT_DISCLAIMER
 
 
 def escape_xml(text: str) -> str:
@@ -245,4 +256,5 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
         duration_label=format_duration_label(notes.duration_seconds),
         participants_label=participants_label,
         sections=sections,
+        disclaimer=TRANSCRIPT_DISCLAIMER,
     )

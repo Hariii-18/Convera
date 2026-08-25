@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { ConversationExportControl } from "@/components/meetings/conversation/conversation-export-control";
 import { ConversationView } from "@/components/meetings/conversation/conversation-view";
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
+import type { ExportCardData, ExportFormat } from "@/components/meetings/downloads/types";
 import { MeetingInfoPanel } from "@/components/meetings/info-panel/meeting-info-panel";
 import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
 import { SpeakersSection } from "@/components/meetings/notes/speakers-section";
@@ -40,12 +41,14 @@ import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normali
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
 import { useExportConversation } from "@/features/transcripts/hooks/use-export-conversation";
 import { useSendConversationEmail } from "@/features/transcripts/hooks/use-send-conversation-email";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { TRANSLATION_LANGUAGES } from "@/features/transcripts/types";
 import type {
   ConversationExportFormat,
   TranslationLanguage,
 } from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
+import { useTimeline } from "@/features/timeline/hooks/use-timeline";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
 import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
@@ -104,6 +107,11 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   });
   const regenerateSummary = useRegenerateSummary(id);
 
+  const { data: timelineEvents, isLoading: isTimelineLoading } = useTimeline(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
+
   const {
     data: meetingNotes,
     isLoading: isMeetingNotesLoading,
@@ -118,6 +126,10 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   const [meetingNotesEditMode, setMeetingNotesEditMode] = useState(false);
   const [meetingNotesExportFormat, setMeetingNotesExportFormat] =
     useState<MeetingNotesExportFormat>("pdf");
+
+  const downloadTranscript = useDownloadTranscript();
+  const [downloadingExportFormat, setDownloadingExportFormat] =
+    useState<ExportFormat | null>(null);
 
   const activity = useMemo<ActivityItem[]>(() => {
     if (!meeting) return [];
@@ -234,6 +246,38 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const [timelineSearch, setTimelineSearch] = useState("");
   const [timelineExpanded, setTimelineExpanded] = useState(false);
+
+  const exportItems = useMemo<ExportCardData[]>(() => {
+    if (isGuest) return [];
+    const items: ExportCardData[] = [];
+    if (meetingNotes) items.push({ format: "pdf" }, { format: "docx" });
+    if (transcript) items.push({ format: "txt" }, { format: "json" });
+    return items;
+  }, [isGuest, meetingNotes, transcript]);
+
+  function handleDownloadExport(format: ExportFormat) {
+    if (downloadingExportFormat || !meeting) return;
+    setDownloadingExportFormat(format);
+    if (format === "pdf" || format === "docx") {
+      exportMeetingNotes.mutate(format, {
+        onSuccess: (downloaded) =>
+          toast.success(`${downloaded.toUpperCase()} downloaded`),
+        onError: (mutationError) =>
+          toast.error(extractErrorMessage(mutationError)),
+        onSettled: () => setDownloadingExportFormat(null),
+      });
+      return;
+    }
+    downloadTranscript.mutate(
+      { meetingId: id, format, fileName: `${meeting.title}.${format}` },
+      {
+        onSuccess: () => toast.success(`${format.toUpperCase()} downloaded`),
+        onError: (mutationError) =>
+          toast.error(extractErrorMessage(mutationError)),
+        onSettled: () => setDownloadingExportFormat(null),
+      },
+    );
+  }
 
   function handleRenameConfirm(title: string) {
     updateMeeting.mutate(
@@ -480,10 +524,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                   item.id === itemId
                     ? {
                         ...item,
+                        // Un-completing clears status back to unknown rather
+                        // than asserting "not started" — that's not
+                        // something the toggle (or the transcript) actually
+                        // established.
                         status:
-                          item.status === "completed"
-                            ? "not-started"
-                            : "completed",
+                          item.status === "completed" ? undefined : "completed",
                       }
                     : item,
                 ),
@@ -592,6 +638,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
         {activeTab === "timeline" && (
           <TimelineViewer
+            events={isGuest ? [] : timelineEvents}
+            isLoading={isGuest ? false : isTimelineLoading}
             searchValue={timelineSearch}
             onSearchChange={setTimelineSearch}
             expanded={timelineExpanded}
@@ -602,13 +650,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
         {activeTab === "downloads" && (
           <DownloadsPanel
-            onDownload={(format) => toast(`Download ${format.toUpperCase()}`)}
-            onRegenerate={(format) =>
-              toast(`Regenerate ${format.toUpperCase()}`)
+            exports={exportItems}
+            loading={isMeetingNotesLoading || isTranscriptLoading}
+            downloadingFormats={
+              downloadingExportFormat ? [downloadingExportFormat] : []
             }
-            onDownloadHistoryEntry={(entry) =>
-              toast(`Download ${entry.fileName}`)
-            }
+            onDownload={handleDownloadExport}
           />
         )}
       </MeetingWorkspaceLayout>

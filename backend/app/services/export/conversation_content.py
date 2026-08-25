@@ -17,12 +17,12 @@ exporter ever touches `Transcript.segments` itself.
 from dataclasses import dataclass, field
 
 from app.schemas.transcript import TranscriptSegmentRead
-from app.services.export.content import format_duration_label
+from app.services.export.content import TRANSCRIPT_DISCLAIMER, format_duration_label
 
-DISCLAIMER = (
-    "This is a computer-generated transcript. It may contain errors and "
-    "should be reviewed for accuracy."
-)
+# Re-exported so existing importers of `DISCLAIMER` from this module keep
+# working — the wording itself lives once, in `content.py`
+# (`TRANSCRIPT_DISCLAIMER`), shared with Meeting Notes exports.
+DISCLAIMER = TRANSCRIPT_DISCLAIMER
 
 
 @dataclass

@@ -63,7 +63,9 @@ def _make_meeting_and_upload(db, user: User):
     from app.crud.meeting import create_meeting
 
     meeting = create_meeting(
-        db, user_id=user.id, meeting_in=MeetingCreate(title="status-verify", source_type="upload-recording")
+        db,
+        user_id=user.id,
+        meeting_in=MeetingCreate(title=f"status-verify-{uuid.uuid4().hex}", source_type="upload-recording"),
     )
     upload = create_upload(
         db,

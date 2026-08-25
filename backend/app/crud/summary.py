@@ -54,3 +54,15 @@ def upsert_summary(
     db.commit()
     db.refresh(record)
     return record
+
+
+def set_timeline_events(db: Session, summary: Summary, events: list[dict]) -> Summary:
+    """Persists the generated timeline events onto a meeting's existing
+    Summary row. Separate from `upsert_summary` since timeline generation
+    runs as its own pipeline step against an already-created Summary (see
+    `app.services.timeline_service`).
+    """
+    summary.timeline_events = events
+    db.commit()
+    db.refresh(summary)
+    return summary

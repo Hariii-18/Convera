@@ -28,6 +28,15 @@ class Summary(Base):
     risks: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     open_questions: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
     next_steps: Mapped[list] = mapped_column(JSONB, default=list, server_default="[]", nullable=False)
+    # Key-moment events from `AIProvider.generate_timeline` (see
+    # `app.services.timeline_service`), each `{"start": float, "label": str}`.
+    # `[]` means "not generated yet" (or the provider produced no events) —
+    # the Timeline tab must render that as an honest empty state, never
+    # fabricate events. One meeting has at most one summary, so timeline
+    # events live alongside it rather than in a dedicated table.
+    timeline_events: Mapped[list] = mapped_column(
+        JSONB, default=list, server_default="[]", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

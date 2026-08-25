@@ -52,7 +52,9 @@ def _get_or_create_test_user(db) -> User:
 
 def _make_upload(db, user: User):
     meeting = create_meeting(
-        db, user_id=user.id, meeting_in=MeetingCreate(title="dedup-verify", source_type="upload-recording")
+        db,
+        user_id=user.id,
+        meeting_in=MeetingCreate(title=f"dedup-verify-{uuid.uuid4().hex}", source_type="upload-recording"),
     )
     upload = create_upload(
         db,

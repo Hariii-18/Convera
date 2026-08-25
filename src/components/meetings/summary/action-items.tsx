@@ -22,8 +22,10 @@ type ActionItemsProps = React.ComponentProps<"div"> & {
 /**
  * Follow-up tasks captured during the meeting: a checkbox (checked when
  * `status` is "completed"), optional assignee and due date, and a status
- * badge. Toggling the checkbox only calls back — this component holds no
- * completion state of its own.
+ * badge — shown only when `status` is set, since it's never inferred (e.g.
+ * defaulted to "not started") for an item the transcript didn't state a
+ * status for. Toggling the checkbox only calls back — this component holds
+ * no completion state of its own.
  */
 function ActionItems({
   className,
@@ -58,7 +60,9 @@ function ActionItems({
           <ul role="list" className="flex flex-col gap-4">
             {items.map((item) => {
               const checked = item.status === "completed";
-              const statusConfig = actionItemStatusConfig[item.status];
+              const statusConfig = item.status
+                ? actionItemStatusConfig[item.status]
+                : undefined;
               const checkboxId = `action-item-${item.id}`;
               const metaId = `action-item-meta-${item.id}`;
               const hasMeta = Boolean(item.assignee || item.dueDate);
@@ -117,9 +121,11 @@ function ActionItems({
                     )}
                   </div>
 
-                  <StatusBadge status={statusConfig.badgeStatus}>
-                    {statusConfig.label}
-                  </StatusBadge>
+                  {statusConfig && (
+                    <StatusBadge status={statusConfig.badgeStatus}>
+                      {statusConfig.label}
+                    </StatusBadge>
+                  )}
                 </li>
               );
             })}

@@ -270,49 +270,53 @@ function LiveCapturePanel() {
           </Button>
         </div>
 
-        {/* Phase 3 + 4 debug readout — capture + transport, nothing further downstream yet. */}
-        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-muted/50 px-3 py-2.5 text-xs sm:grid-cols-4">
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Chunks</dt>
-            <dd className="font-medium text-foreground">{capture.chunkCount}</dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Last chunk</dt>
-            <dd className="font-medium text-foreground">
-              {lastChunk ? formatBytes(lastChunk.blob.size) : "—"}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Format</dt>
-            <dd className="truncate font-medium text-foreground">{capture.mimeType ?? "—"}</dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Meeting ID</dt>
-            <dd className="truncate font-mono font-medium text-foreground">
-              {meetingId ?? "—"}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Socket</dt>
-            <dd className="font-medium text-foreground">{liveTransport.state}</dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Last sent #</dt>
-            <dd className="font-medium text-foreground">
-              {liveTransport.stats.lastSentSequence ?? "—"}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Last acked #</dt>
-            <dd className="font-medium text-foreground">
-              {liveTransport.stats.lastAckedSequence ?? "—"}
-            </dd>
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <dt className="text-muted-foreground">Queued</dt>
-            <dd className="font-medium text-foreground">{liveTransport.stats.queued}</dd>
-          </div>
-        </dl>
+        {/* Phase 3 + 4 debug readout — capture + transport. Dev-only: this is
+            internal wiring detail, not something an end user should see in
+            production. */}
+        {process.env.NODE_ENV !== "production" && (
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-muted/50 px-3 py-2.5 text-xs sm:grid-cols-4">
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Chunks</dt>
+              <dd className="font-medium text-foreground">{capture.chunkCount}</dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Last chunk</dt>
+              <dd className="font-medium text-foreground">
+                {lastChunk ? formatBytes(lastChunk.blob.size) : "—"}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Format</dt>
+              <dd className="truncate font-medium text-foreground">{capture.mimeType ?? "—"}</dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Meeting ID</dt>
+              <dd className="truncate font-mono font-medium text-foreground">
+                {meetingId ?? "—"}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Socket</dt>
+              <dd className="font-medium text-foreground">{liveTransport.state}</dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Last sent #</dt>
+              <dd className="font-medium text-foreground">
+                {liveTransport.stats.lastSentSequence ?? "—"}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Last acked #</dt>
+              <dd className="font-medium text-foreground">
+                {liveTransport.stats.lastAckedSequence ?? "—"}
+              </dd>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <dt className="text-muted-foreground">Queued</dt>
+              <dd className="font-medium text-foreground">{liveTransport.stats.queued}</dd>
+            </div>
+          </dl>
+        )}
 
         {/* Phase 5: live transcription status + segments as they arrive. No
             final Transcript Viewer, normalization, or summary here — that's

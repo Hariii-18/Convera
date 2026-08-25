@@ -23,6 +23,23 @@ class SummaryActionItemRead(BaseModel):
     due_date: str | None = None
 
 
+class TimelineEventRead(BaseModel):
+    """One key moment from `Summary.timeline_events`. `description` and
+    `event_type` are placeholders for richer AI output later — the current
+    `AIProvider.generate_timeline` only produces a timestamp and a label, so
+    both stay unset rather than being fabricated.
+    """
+
+    start: float
+    title: str
+    description: str | None = None
+
+
+class TimelineRead(BaseModel):
+    meeting_id: uuid.UUID
+    events: list[TimelineEventRead]
+
+
 class SummaryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

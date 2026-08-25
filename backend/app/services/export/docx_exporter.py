@@ -32,6 +32,12 @@ class DocxExporter:
             meta_run.font.size = Pt(9)
             meta_run.font.color.rgb = _META_COLOR
 
+        disclaimer_paragraph = doc.add_paragraph()
+        disclaimer_run = disclaimer_paragraph.add_run(document.disclaimer)
+        disclaimer_run.italic = True
+        disclaimer_run.font.size = Pt(8)
+        disclaimer_run.font.color.rgb = _META_COLOR
+
         for section in document.sections:
             doc.add_heading(section.heading, level=1)
             if not section.lines:

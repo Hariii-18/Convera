@@ -36,6 +36,7 @@ from app.models.summary import Summary
 from app.services.meeting_notes_service import ensure_meeting_notes
 from app.services.normalization_service import generate_normalized_transcript
 from app.services.summary_service import generate_summary
+from app.services.timeline_service import generate_timeline_for_meeting
 
 logger = logging.getLogger("converra")
 
@@ -44,6 +45,7 @@ StageReporter = Callable[[str, int], None]
 _STAGE_FINALIZING = "Finalizing transcript"
 _STAGE_NORMALIZING = "Normalizing transcript"
 _STAGE_SUMMARIZING = "Generating summary"
+_STAGE_TIMELINE = "Generating timeline"
 
 
 def run_post_transcription_pipeline(
@@ -108,6 +110,14 @@ def run_post_transcription_pipeline(
     existing_summary = get_summary_by_meeting_id(db, meeting_id)
     if existing_summary is not None:
         logger.info("Pipeline: summary already exists for meeting %s, skipping", meeting_id)
+        if not existing_summary.timeline_events:
+            # Retryable the same way normalization is: an empty list is both
+            # "never generated" and "last attempt found nothing", so a
+            # meeting summarized before this feature existed (or whose
+            # provider was unreachable last time) picks up a timeline on the
+            # next pipeline run instead of staying empty forever.
+            report(_STAGE_TIMELINE, 97)
+            existing_summary = generate_timeline_for_meeting(db, meeting_id, existing_summary)
         # Still ensure Meeting Notes exists (e.g. a meeting summarized before
         # this table existed) - a no-op if it's already there, and it must
         # never re-derive over a user's saved edits either way. See
@@ -118,5 +128,7 @@ def run_post_transcription_pipeline(
     report(_STAGE_SUMMARIZING, 96)
     logger.info("Pipeline: generating summary for meeting %s", meeting_id)
     summary = generate_summary(db, meeting_id)
+    report(_STAGE_TIMELINE, 98)
+    summary = generate_timeline_for_meeting(db, meeting_id, summary)
     ensure_meeting_notes(db, meeting_id)
     return summary

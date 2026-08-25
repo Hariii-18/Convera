@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_current_user
 from app.crud.meeting import get_meeting_status_counts
 from app.crud.processing_job import get_processing_stats
+from app.crud.upload import get_total_upload_size_bytes
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.dashboard import DashboardStats
@@ -20,7 +21,7 @@ def stats(
     processing_stats = get_processing_stats(db, current_user.id)
     return DashboardStats(
         total_meetings=sum(counts.values()),
-        storage_used_bytes=0,
+        storage_used_bytes=get_total_upload_size_bytes(db, current_user.id),
         currently_processing=processing_stats.currently_processing,
         queued_jobs=processing_stats.queued_jobs,
         completed_today=processing_stats.completed_today,

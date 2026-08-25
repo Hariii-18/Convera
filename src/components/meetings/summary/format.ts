@@ -75,7 +75,7 @@ export function buildSummaryText({
           const checked = item.status === "completed" ? "x" : " ";
           const details = [
             item.assignee?.name,
-            actionItemStatusConfig[item.status].label,
+            item.status ? actionItemStatusConfig[item.status].label : undefined,
           ]
             .filter(Boolean)
             .join(" · ");

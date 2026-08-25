@@ -29,7 +29,9 @@ export type ActionItemData = {
   text: string;
   assignee?: ActionItemAssignee;
   dueDate?: string | Date;
-  status: ActionItemStatus;
+  /** Omit when the transcript didn't explicitly support a status — never
+   * inferred (e.g. defaulted to "not-started"). */
+  status?: ActionItemStatus;
 };
 
 export type RiskData = {

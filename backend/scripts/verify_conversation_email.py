@@ -222,8 +222,13 @@ def check_f_renamed_speaker_in_attachment(db, meeting_id, user, registry: list) 
         turn_speakers,
     )
     check(
-        "F: computer-generated disclaimer present",
-        "computer-generated" in document.disclaimer.lower(),
+        "F: exact transcript disclaimer present",
+        document.disclaimer
+        == (
+            "This editable transcript was computer generated and might "
+            "contain errors. People can also change the text after it was "
+            "created."
+        ),
         document.disclaimer,
     )
 

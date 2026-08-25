@@ -1,5 +1,6 @@
 import uuid
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.upload import Upload
@@ -87,3 +88,12 @@ def mark_upload_failed(db: Session, upload: Upload) -> Upload:
     db.commit()
     db.refresh(upload)
     return upload
+
+
+def get_total_upload_size_bytes(db: Session, user_id: int) -> int:
+    total = (
+        db.query(func.coalesce(func.sum(Upload.size_bytes), 0))
+        .filter(Upload.user_id == user_id, Upload.deleted_at.is_(None))
+        .scalar()
+    )
+    return int(total)

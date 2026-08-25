@@ -34,7 +34,11 @@ class PdfExporter:
         )
         title_style = ParagraphStyle("Title", parent=styles["Title"], fontSize=20, spaceAfter=4)
         meta_style = ParagraphStyle(
-            "Meta", parent=styles["Normal"], textColor=colors.grey, fontSize=9, spaceAfter=18
+            "Meta", parent=styles["Normal"], textColor=colors.grey, fontSize=9, spaceAfter=6
+        )
+        disclaimer_style = ParagraphStyle(
+            "Disclaimer", parent=styles["Normal"], textColor=colors.grey,
+            fontSize=8, fontName="Helvetica-Oblique", spaceAfter=18,
         )
         heading_style = ParagraphStyle(
             "SectionHeading", parent=styles["Heading2"], spaceBefore=16, spaceAfter=8
@@ -52,7 +56,8 @@ class PdfExporter:
         if meta_line:
             story.append(Paragraph(meta_line, meta_style))
         else:
-            story.append(Spacer(1, 18))
+            story.append(Spacer(1, 6))
+        story.append(Paragraph(escape_xml(document.disclaimer), disclaimer_style))
 
         for section in document.sections:
             story.append(Paragraph(escape_xml(section.heading), heading_style))

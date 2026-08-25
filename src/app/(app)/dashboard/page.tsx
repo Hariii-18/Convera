@@ -50,6 +50,7 @@ import { useUploadTarget } from "@/features/meetings/hooks/use-upload-target";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
 import { isTerminalStatus } from "@/features/processing/mappers";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { RenameMeetingDialog } from "@/components/meetings/rename-meeting-dialog";
 import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
@@ -96,6 +97,7 @@ export default function DashboardPage() {
   const { data: processingJobs, isLoading: isProcessingLoading } = useProcessing({
     enabled: isReady && !isGuest,
   });
+  const downloadTranscript = useDownloadTranscript();
 
   const statsUnavailable = isStatsError || isGuest;
   const dashboardStats: StatItem[] = [
@@ -317,9 +319,22 @@ export default function DashboardPage() {
             onRenameMeeting={(meeting) =>
               guard("rename-meeting", () => setRenameTarget(meeting))
             }
-            onDownloadMeeting={(meeting) =>
-              toast(`Download "${meeting.title}"`)
-            }
+            onDownloadMeeting={(meeting) => {
+              if (downloadTranscript.isPending) return;
+              downloadTranscript.mutate(
+                {
+                  meetingId: meeting.id,
+                  format: "txt",
+                  fileName: `${meeting.title}.txt`,
+                },
+                {
+                  onSuccess: () =>
+                    toast.success(`Downloaded "${meeting.title}"`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                },
+              );
+            }}
             onDeleteMeeting={(meeting) =>
               guard("delete-meeting", () => setDeleteTarget(meeting))
             }

@@ -177,13 +177,17 @@ def check_g_export_reflects_edits(db, meeting_id, user_id) -> None:
     # DOCX is a zip of compressed XML, so the edited title text won't appear
     # as a literal substring in the raw bytes - assert against the shared
     # content model instead, which is what every exporter actually renders.
-    from app.services.export.content import build_export_document
+    from app.services.export.content import TRANSCRIPT_DISCLAIMER, build_export_document
     notes = get_meeting_notes(db, meeting_id, user_id)
     document = build_export_document(notes)
     assert document.meeting_title == "Edited Meeting Title"
     assert document.sections[0].lines[0] == "Edited executive summary text."
+    assert document.disclaimer == TRANSCRIPT_DISCLAIMER, (
+        "Meeting Notes export must carry the exact editable-transcript disclaimer"
+    )
     assert len(content) > 0
     print("OK G: export content reflects the edited MeetingNotes, not the original AI output")
+    print("OK G2: export document carries the exact transcript disclaimer")
 
 
 def check_h_unauthorized_rejected(db, meeting_id, other_user_id) -> None:
