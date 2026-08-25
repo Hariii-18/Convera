@@ -41,17 +41,29 @@ type MeetingNotesEmailDialogProps = {
    * so a duplicate click can't fire a second request. */
   sending?: boolean;
   onSend: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
+  /** Dialog title — defaults to the Meeting Notes copy. Overridden by other
+   * callers (e.g. the Conversation view) that reuse this same dialog. */
+  title?: string;
+  /** Dialog description — defaults to the Meeting Notes copy. */
+  description?: string;
 };
 
 /**
- * "Send to Email" trigger + dialog for Meeting Notes: a "Send to me"
- * checkbox (default on), an input to add further addresses as removable
- * chips, and a Send button. Validation (well-formed address, no duplicates,
- * at most `MAX_RECIPIENTS`) mirrors what the backend enforces — this is a
- * head start on those errors, not a replacement for them, so a failed send
- * still surfaces the server's message inline.
+ * "Send to Email" trigger + dialog: a "Send to me" checkbox (default on),
+ * an input to add further addresses as removable chips, and a Send button.
+ * Validation (well-formed address, no duplicates, at most `MAX_RECIPIENTS`)
+ * mirrors what the backend enforces — this is a head start on those errors,
+ * not a replacement for them, so a failed send still surfaces the server's
+ * message inline. Originally built for Meeting Notes; `title`/`description`
+ * let other export flows (e.g. Conversation) reuse the same dialog.
  */
-function MeetingNotesEmailDialog({ ownEmail, sending = false, onSend }: MeetingNotesEmailDialogProps) {
+function MeetingNotesEmailDialog({
+  ownEmail,
+  sending = false,
+  onSend,
+  title = "Send Meeting Notes",
+  description = "Emails the currently saved Meeting Notes in the selected format.",
+}: MeetingNotesEmailDialogProps) {
   const [open, setOpen] = React.useState(false);
   const [sendToMe, setSendToMe] = React.useState(true);
   const [recipients, setRecipients] = React.useState<string[]>([]);
@@ -132,10 +144,8 @@ function MeetingNotesEmailDialog({ ownEmail, sending = false, onSend }: MeetingN
 
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Send Meeting Notes</DialogTitle>
-          <DialogDescription>
-            Emails the currently saved Meeting Notes in the selected format.
-          </DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col gap-3">

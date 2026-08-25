@@ -3,6 +3,7 @@ import {
   Download,
   FileText,
   History,
+  MessagesSquare,
   NotebookText,
   Sparkles,
   type LucideIcon,
@@ -15,6 +16,7 @@ import {
 export type WorkspaceTabValue =
   | "overview"
   | "transcript"
+  | "conversation"
   | "summary"
   | "notes"
   | "timeline"
@@ -29,6 +31,7 @@ export type WorkspaceTab = {
 export const workspaceTabs: WorkspaceTab[] = [
   { value: "overview", label: "Overview", icon: ClipboardList },
   { value: "transcript", label: "Transcript", icon: FileText },
+  { value: "conversation", label: "Conversation", icon: MessagesSquare },
   { value: "summary", label: "Summary", icon: Sparkles },
   { value: "notes", label: "Meeting Notes", icon: NotebookText },
   { value: "timeline", label: "Timeline", icon: History },

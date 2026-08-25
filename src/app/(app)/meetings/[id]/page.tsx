@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { FileWarning, SearchX } from "lucide-react";
 import { toast } from "sonner";
 
+import { ConversationExportControl } from "@/components/meetings/conversation/conversation-export-control";
+import { ConversationView } from "@/components/meetings/conversation/conversation-view";
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
 import { MeetingInfoPanel } from "@/components/meetings/info-panel/meeting-info-panel";
 import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
@@ -36,8 +38,13 @@ import { useRetryProcessing } from "@/features/processing/hooks/use-retry-proces
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
+import { useExportConversation } from "@/features/transcripts/hooks/use-export-conversation";
+import { useSendConversationEmail } from "@/features/transcripts/hooks/use-send-conversation-email";
 import { TRANSLATION_LANGUAGES } from "@/features/transcripts/types";
-import type { TranslationLanguage } from "@/features/transcripts/types";
+import type {
+  ConversationExportFormat,
+  TranslationLanguage,
+} from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
@@ -86,6 +93,10 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   });
   const normalizeTranscript = useNormalizeTranscript(id);
   const translateTranscript = useTranslateTranscript(id);
+  const exportConversation = useExportConversation(id);
+  const sendConversationEmail = useSendConversationEmail(id);
+  const [conversationExportFormat, setConversationExportFormat] =
+    useState<ConversationExportFormat>("pdf");
 
   const { data: summary, isLoading: isSummaryLoading } = useSummary(id, {
     enabled: isReady && !isGuest,
@@ -402,6 +413,53 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               )
             }
           />
+        )}
+
+        {activeTab === "conversation" && (
+          <div className="flex flex-col gap-4">
+            {!isGuest && (
+              <ConversationExportControl
+                format={conversationExportFormat}
+                onFormatChange={setConversationExportFormat}
+                downloading={exportConversation.isPending}
+                onDownload={() =>
+                  exportConversation.mutate(conversationExportFormat, {
+                    onSuccess: (format) =>
+                      toast.success(`${format.toUpperCase()} downloaded`),
+                    onError: (mutationError) =>
+                      toast.error(extractErrorMessage(mutationError)),
+                  })
+                }
+                ownEmail={ownEmail}
+                sendingEmail={sendConversationEmail.isPending}
+                onSendEmail={async ({ sendToMe, recipients }) => {
+                  if (sendConversationEmail.isPending) return;
+                  const result = await sendConversationEmail.mutateAsync({
+                    format: conversationExportFormat,
+                    sendToMe,
+                    recipients,
+                  });
+                  const count = result.recipients.length;
+                  toast.success(
+                    `${result.format.toUpperCase()} emailed to ${count} recipient${count === 1 ? "" : "s"}`,
+                  );
+                }}
+              />
+            )}
+            <ConversationView
+              blocks={displayedTranscriptBlocks}
+              isLoading={isGuest ? false : isTranscriptLoading}
+              onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
+              emptyTitle={
+                isTranscriptError ? "Couldn't load transcript" : undefined
+              }
+              emptyDescription={
+                isTranscriptError
+                  ? "Something went wrong fetching the transcript. Try refreshing the page."
+                  : undefined
+              }
+            />
+          </div>
         )}
 
         {activeTab === "summary" && (

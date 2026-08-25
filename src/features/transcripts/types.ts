@@ -38,6 +38,23 @@ export type TranscriptResponse = {
   updated_at: string;
 };
 
+/** Formats the Conversation export endpoint renders — PDF/DOCX only for now. */
+export type ConversationExportFormat = "pdf" | "docx";
+
+/** Body for `POST /transcripts/{meeting_id}/conversation/email`. `send_to_me`
+ * and `recipients` are merged and deduplicated server-side into the final
+ * send list — see `backend/app/services/conversation_email_service.py`. */
+export type ConversationEmailRequest = {
+  format: ConversationExportFormat;
+  send_to_me: boolean;
+  recipients: string[];
+};
+
+export type ConversationEmailResponse = {
+  sent: boolean;
+  recipients: string[];
+};
+
 /** Languages the translation layer supports; matches the backend's `TranslationLanguage`. */
 export type TranslationLanguage = "en" | "hi" | "te";
 

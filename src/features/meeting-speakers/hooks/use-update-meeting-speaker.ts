@@ -28,6 +28,10 @@ export function useUpdateMeetingSpeaker(meetingId: string) {
             speaker,
           ],
       );
+      // The transcript's segments carry a `speaker_name` resolved fresh at
+      // fetch time — refetch it so a rename shows up in the Transcript and
+      // Conversation tabs without a manual page reload.
+      queryClient.invalidateQueries({ queryKey: ["transcripts", meetingId] });
     },
   });
 }

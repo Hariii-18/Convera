@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 TranslationLanguage = Literal["en", "hi", "te"]
 
@@ -54,3 +54,32 @@ class TranscriptRead(BaseModel):
     translated_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+
+class ConversationEmailRequest(BaseModel):
+    """Body for `POST /transcripts/{meeting_id}/conversation/email`. Mirrors
+    `MeetingNotesEmailRequest` (`app.schemas.meeting_notes`) field-for-field
+    — `send_to_me` and `recipients` are merged, trimmed, and deduplicated
+    server-side by the same `resolve_email_recipients` helper (see
+    `app.services.conversation_email_service`), capped at
+    `MAX_MEETING_NOTES_EMAIL_RECIPIENTS` total addresses. This schema only
+    validates that each individual address is well-formed; the raw list is
+    capped well above that so an oversized payload fails fast instead of
+    paying per-address validation cost.
+    """
+
+    format: Literal["pdf", "docx"]
+    send_to_me: bool = True
+    recipients: list[EmailStr] = Field(default_factory=list, max_length=50)
+
+    @field_validator("recipients", mode="before")
+    @classmethod
+    def _strip_recipients(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() if isinstance(item, str) else item for item in value]
+        return value
+
+
+class ConversationEmailResponse(BaseModel):
+    sent: bool
+    recipients: list[str]
