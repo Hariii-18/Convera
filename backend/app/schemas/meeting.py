@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 MeetingStatus = Literal["scheduled", "processing", "completed", "failed"]
 MeetingSourceType = Literal[
@@ -13,6 +13,14 @@ MeetingSourceType = Literal[
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     source_type: MeetingSourceType
+
+    @field_validator("title")
+    @classmethod
+    def _trim_title(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("title must not be empty or whitespace-only")
+        return trimmed
 
 
 class MeetingUpdate(BaseModel):
@@ -26,6 +34,16 @@ class MeetingUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("title")
+    @classmethod
+    def _trim_title(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        trimmed = value.strip()
+        if not trimmed:
+            raise ValueError("title must not be empty or whitespace-only")
+        return trimmed
 
 
 class MeetingRead(BaseModel):

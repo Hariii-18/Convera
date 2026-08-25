@@ -16,6 +16,13 @@ class TranscriptSegmentRead(BaseModel):
     # reliable diarization overlap was found. Defaults to `None` so
     # transcripts persisted before this field existed still deserialize.
     speaker_key: str | None = None
+    # Presentation-only: `speaker_key` resolved to the current
+    # `MeetingSpeaker.display_name` (see `app.services.speaker_resolution`),
+    # `Speaker N` when no `MeetingSpeaker` row exists for the key, or `None`
+    # when `speaker_key` itself is `None`. Never stored — always computed
+    # fresh at read time, and never sent back on a write (`MeetingNotesUpdate`
+    # reuses this schema for input but nothing ever persists this field).
+    speaker_name: str | None = None
 
 
 class TranscriptNormalize(BaseModel):

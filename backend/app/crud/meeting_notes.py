@@ -62,6 +62,27 @@ _UPDATABLE_FIELDS = (
 )
 
 
+def _restore_speaker_keys(existing: list[dict], incoming: list[dict]) -> list[dict]:
+    """`MeetingNotesUpdate.timestamped_discussion` round-trips only
+    `start`/`end`/`text` (see `EditableDetailedDiscussion` on the frontend,
+    which never reads or writes `speaker_key`), so saving an edit would
+    otherwise silently drop the diarization-assigned `speaker_key` off every
+    segment. Restores each segment's `speaker_key` from the row already
+    stored at the same index instead — segment order/count is preserved by
+    the editor (only `text` changes) — and never invents one for a segment
+    that didn't have it. `speaker_name` is never stored either way; it's
+    resolved fresh from `MeetingSpeaker` on every read (see
+    `meeting_notes_service._to_read`).
+    """
+    merged = []
+    for index, segment in enumerate(incoming):
+        speaker_key = segment.get("speaker_key")
+        if speaker_key is None and index < len(existing):
+            speaker_key = existing[index].get("speaker_key")
+        merged.append({**segment, "speaker_key": speaker_key})
+    return merged
+
+
 def update_meeting_notes(
     db: Session, notes: MeetingNotes, notes_in: MeetingNotesUpdate
 ) -> MeetingNotes:
@@ -71,7 +92,10 @@ def update_meeting_notes(
     data = notes_in.model_dump(exclude_unset=True)
     for field in _UPDATABLE_FIELDS:
         if field in data:
-            setattr(notes, field, data[field])
+            value = data[field]
+            if field == "timestamped_discussion":
+                value = _restore_speaker_keys(notes.timestamped_discussion, value)
+            setattr(notes, field, value)
     db.commit()
     db.refresh(notes)
     return notes

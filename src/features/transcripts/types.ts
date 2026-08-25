@@ -8,6 +8,14 @@ export type TranscriptSegmentResponse = {
   start: number;
   end: number;
   text: string;
+  /** Stable diarization-assigned key (`speaker_1`, ...), `null` when this
+   * segment has no reliable speaker attribution. Never a display name. */
+  speaker_key?: string | null;
+  /** `speaker_key` resolved to the current `MeetingSpeaker.display_name` —
+   * `Speaker N` if no speaker row exists for the key, `null` when
+   * `speaker_key` itself is `null`. Resolved fresh on every read, never
+   * stored. */
+  speaker_name?: string | null;
 };
 
 export type TranscriptResponse = {

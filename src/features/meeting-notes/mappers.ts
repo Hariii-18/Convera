@@ -84,6 +84,9 @@ export function toMeetingNotes(response: MeetingNotesResponse): MeetingNotes {
       id: `${response.meeting_id}-segment-${index}`,
       timestampSeconds: Math.round(segment.start),
       text: segment.text,
+      speaker: segment.speaker_name
+        ? { id: segment.speaker_key ?? segment.speaker_name, name: segment.speaker_name }
+        : undefined,
     })),
     timestampedDiscussion: response.timestamped_discussion.map((segment, index) => ({
       id: `${response.meeting_id}-segment-${index}`,

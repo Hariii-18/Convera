@@ -43,6 +43,7 @@ def generate_normalized_transcript(db: Session, meeting_id: uuid.UUID) -> Transc
             "start": segment["start"],
             "end": segment["end"],
             "text": normalized_text_by_index.get(index) or segment["text"],
+            "speaker_key": segment.get("speaker_key"),
         }
         for index, segment in enumerate(raw_segments)
     ]

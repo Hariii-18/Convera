@@ -17,6 +17,7 @@ from app.models.meeting import Meeting
 from app.models.meeting_notes import MeetingNotes
 from app.models.transcript import Transcript
 from app.schemas.meeting_notes import MeetingNotesRead, MeetingNotesUpdate
+from app.services.speaker_resolution import build_speaker_name_map, resolve_segments
 
 _PRESENTATION_TIMEZONE = ZoneInfo("Asia/Kolkata")
 
@@ -80,7 +81,9 @@ def ensure_meeting_notes(db: Session, meeting_id: uuid.UUID) -> MeetingNotes | N
     )
 
 
-def _to_read(meeting: Meeting, notes: MeetingNotes, transcript: Transcript | None) -> MeetingNotesRead:
+def _to_read(
+    db: Session, meeting: Meeting, notes: MeetingNotes, transcript: Transcript | None
+) -> MeetingNotesRead:
     duration_seconds = meeting.duration_seconds
     if duration_seconds is None and transcript is not None and transcript.duration is not None:
         duration_seconds = round(transcript.duration)
@@ -92,6 +95,13 @@ def _to_read(meeting: Meeting, notes: MeetingNotes, transcript: Transcript | Non
         full_transcript = transcript.normalized_transcript or transcript.transcript
 
     meeting_datetime = meeting.created_at
+
+    # Speaker identity is resolved fresh from `MeetingSpeaker` on every read
+    # (Speaker System Part 5, see `app.services.speaker_resolution`) rather
+    # than stored on `MeetingNotes.timestamped_discussion` itself, so a
+    # rename in the Speakers panel shows up immediately without touching
+    # this row.
+    name_map = build_speaker_name_map(db, meeting.id)
 
     return MeetingNotesRead(
         id=notes.id,
@@ -110,7 +120,7 @@ def _to_read(meeting: Meeting, notes: MeetingNotes, transcript: Transcript | Non
         risks=notes.risks,
         open_questions=notes.open_questions,
         next_steps=notes.next_steps,
-        timestamped_discussion=notes.timestamped_discussion,
+        timestamped_discussion=resolve_segments(notes.timestamped_discussion, name_map),
         full_transcript=full_transcript,
         created_at=notes.created_at,
         updated_at=notes.updated_at,
@@ -135,7 +145,7 @@ def get_meeting_notes(db: Session, meeting_id: uuid.UUID, user_id: int) -> Meeti
         )
 
     transcript = get_transcript_by_meeting_id(db, meeting_id)
-    return _to_read(meeting, notes, transcript)
+    return _to_read(db, meeting, notes, transcript)
 
 
 def update_meeting_notes(
@@ -158,4 +168,4 @@ def update_meeting_notes(
 
     notes = _update_meeting_notes_row(db, notes, notes_in)
     transcript = get_transcript_by_meeting_id(db, meeting_id)
-    return _to_read(meeting, notes, transcript)
+    return _to_read(db, meeting, notes, transcript)

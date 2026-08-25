@@ -21,6 +21,7 @@ import { useUploads } from "@/features/uploads/hooks/use-uploads";
 import type { Upload } from "@/features/uploads/mappers";
 import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { useUploadTarget } from "@/features/meetings/hooks/use-upload-target";
 import { toMeeting } from "@/features/meetings/mappers";
 import type { Meeting } from "@/components/meetings/types";
 
@@ -30,7 +31,7 @@ export default function UploadsPage() {
 
   const [deleteTarget, setDeleteTarget] = useState<Upload | null>(null);
   const [startDialogOpen, setStartDialogOpen] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
+  const uploadTarget = useUploadTarget();
 
   const {
     data: uploads,
@@ -62,7 +63,7 @@ export default function UploadsPage() {
     const meeting = meetingsById.get(meetingId);
     if (!meeting) return;
     setStartDialogOpen(false);
-    setUploadTarget(meeting);
+    uploadTarget.startForExistingMeeting(meeting);
   }
 
   function handleCreateNew(title: string) {
@@ -71,7 +72,7 @@ export default function UploadsPage() {
       {
         onSuccess: (meeting) => {
           setStartDialogOpen(false);
-          setUploadTarget(toMeeting(meeting));
+          uploadTarget.startForNewMeeting(toMeeting(meeting));
         },
         onError: (mutationError) => {
           toast.error(extractErrorMessage(mutationError));
@@ -167,12 +168,13 @@ export default function UploadsPage() {
         onCreateNew={handleCreateNew}
       />
 
-      {uploadTarget && (
+      {uploadTarget.meeting && (
         <UploadDialog
-          open={Boolean(uploadTarget)}
-          onOpenChange={(open) => !open && setUploadTarget(null)}
-          meetingId={uploadTarget.id}
-          meetingTitle={uploadTarget.title}
+          open={Boolean(uploadTarget.meeting)}
+          onOpenChange={(open) => !open && uploadTarget.close()}
+          meetingId={uploadTarget.meeting.id}
+          meetingTitle={uploadTarget.meeting.title}
+          onUploaded={uploadTarget.markUploaded}
         />
       )}
 

@@ -46,6 +46,7 @@ import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { useUploadTarget } from "@/features/meetings/hooks/use-upload-target";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
 import { isTerminalStatus } from "@/features/processing/mappers";
@@ -87,7 +88,7 @@ export default function DashboardPage() {
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
+  const uploadTarget = useUploadTarget();
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
@@ -218,7 +219,7 @@ export default function DashboardPage() {
         onSuccess: (meeting) => {
           setNewMeetingOpen(false);
           if (data.source === "upload-recording") {
-            setUploadTarget(toMeeting(meeting));
+            uploadTarget.startForNewMeeting(toMeeting(meeting));
             return;
           }
           router.push(getPostCreateRoute(data.source, meeting.id));
@@ -343,12 +344,13 @@ export default function DashboardPage() {
         onContinue={handleContinue}
       />
 
-      {uploadTarget && (
+      {uploadTarget.meeting && (
         <UploadDialog
-          open={Boolean(uploadTarget)}
-          onOpenChange={(open) => !open && setUploadTarget(null)}
-          meetingId={uploadTarget.id}
-          meetingTitle={uploadTarget.title}
+          open={Boolean(uploadTarget.meeting)}
+          onOpenChange={(open) => !open && uploadTarget.close()}
+          meetingId={uploadTarget.meeting.id}
+          meetingTitle={uploadTarget.meeting.title}
+          onUploaded={uploadTarget.markUploaded}
         />
       )}
 

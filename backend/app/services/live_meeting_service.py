@@ -1,10 +1,14 @@
 """Live Meeting session lifecycle (Phase 2) and finalization (Phase 6).
 
-Owns the state machine for a Live Meeting session, independent of the
-Meeting model's own `status` field (which stays in its existing
-scheduled/processing/completed/failed vocabulary — see `LiveMeetingSession`
-docstring in the model module for why this is a separate table rather than
-widening that field).
+Owns the state machine for a Live Meeting session. `LiveMeetingSession.state`
+stays the authoritative Live lifecycle (see `LiveMeetingSession` docstring in
+the model module for why this is a separate table rather than widening
+`Meeting.status`) -- but `Meeting.status` is synced to it at each reachable
+transition (via `update_meeting_status`, the same validated internal path
+`processing_service` uses) so the Meetings list/detail, which only ever
+reads `Meeting.status`, reflects a Live Meeting's outcome:
+live/stopping/finalizing -> `processing`, completed -> `completed`, failed ->
+`failed`. `cancel_live_meeting` is the one exception -- see its docstring.
 
 State machine:
 
@@ -36,7 +40,7 @@ from app.crud.live_meeting_session import (
     get_live_session,
     lock_live_session,
 )
-from app.crud.meeting import create_meeting, get_meeting_by_id
+from app.crud.meeting import create_meeting, get_meeting_by_id, update_meeting_status
 from app.crud.processing_job import list_processing_jobs
 from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
 from app.crud.upload import create_upload, list_uploads_by_meeting_id
@@ -124,6 +128,11 @@ def start_live_meeting(db: Session, user: User, *, title: str) -> LiveMeetingSes
     `live_meeting_sessions` backs this at the database level too, so two
     concurrent start requests can't both slip past the check above and
     create two active sessions.
+
+    `Meeting.status` is synced to `"processing"` once the session is
+    confirmed created (not before -- if `create_live_session` loses the
+    race below, the freshly created `Meeting` is an orphan and is left at
+    its default `"scheduled"`, same as before this sync existed).
     """
     existing = get_active_live_session_for_user(db, user.id)
     if existing is not None:
@@ -136,13 +145,16 @@ def start_live_meeting(db: Session, user: User, *, title: str) -> LiveMeetingSes
     )
 
     try:
-        return create_live_session(db, meeting_id=meeting.id, user_id=user.id)
+        live_session = create_live_session(db, meeting_id=meeting.id, user_id=user.id)
     except IntegrityError:
         db.rollback()
         existing = get_active_live_session_for_user(db, user.id)
         if existing is not None:
             return existing
         raise
+
+    update_meeting_status(db, meeting, "processing")
+    return live_session
 
 
 def get_live_session_read(db: Session, meeting_id: uuid.UUID, user: User) -> LiveMeetingSessionRead:
@@ -210,25 +222,46 @@ def begin_live_finalization(db: Session, session: LiveMeetingSession) -> LiveMee
     return _transition(db, session, allowed_sources=("stopping",), target="finalizing")
 
 
+def _sync_meeting_status_for_session(db: Session, session: LiveMeetingSession, new_status: str) -> None:
+    """Best-effort `Meeting.status` sync for a live session transition.
+
+    Uses `get_meeting_by_id` (unfiltered by user) since this always runs
+    from a trusted internal call site with only a `meeting_id` on hand, same
+    as the post-transcription pipeline. Idempotent via `update_meeting_status`
+    itself (a no-op if already at `new_status`), so re-entering an already
+    terminal transition (duplicate finalize/retry) is safe.
+    """
+    meeting = get_meeting_by_id(db, session.meeting_id)
+    if meeting is not None:
+        update_meeting_status(db, meeting, new_status)
+
+
 def complete_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
     """`finalizing -> completed`. Called by `finalize_live_meeting` /
     `retry_live_meeting` once a final transcript has been persisted and
     `run_post_transcription_pipeline` has run.
+
+    Also syncs `Meeting.status` to `"completed"`.
     """
-    return _transition(
+    locked = _transition(
         db,
         session,
         allowed_sources=("finalizing",),
         target="completed",
         ended_at=datetime.now(timezone.utc),
     )
+    _sync_meeting_status_for_session(db, locked, "completed")
+    return locked
 
 
 def fail_live_meeting(
     db: Session, session: LiveMeetingSession, *, error_message: str
 ) -> LiveMeetingSession:
-    """`live/stopping/finalizing -> failed`, preserving `error_message`."""
-    return _transition(
+    """`live/stopping/finalizing -> failed`, preserving `error_message`.
+
+    Also syncs `Meeting.status` to `"failed"`.
+    """
+    locked = _transition(
         db,
         session,
         allowed_sources=("live", "stopping", "finalizing"),
@@ -236,10 +269,20 @@ def fail_live_meeting(
         error_message=error_message,
         ended_at=datetime.now(timezone.utc),
     )
+    _sync_meeting_status_for_session(db, locked, "failed")
+    return locked
 
 
 def cancel_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingSession:
-    """`live/stopping/finalizing -> cancelled`."""
+    """`live/stopping/finalizing -> cancelled`.
+
+    `Meeting.status` is intentionally left untouched here: this transition
+    has no reachable API endpoint today (nothing in `app.api.v1.live_meetings`
+    calls it), and there is no `"cancelled"` value in
+    `MEETING_STATUS_TRANSITIONS` for it to map to -- wiring up a cancel
+    endpoint and deciding what it should mean for `Meeting.status` is a
+    separate, net-new feature, not part of this sync fix.
+    """
     return _transition(
         db,
         session,
@@ -402,6 +445,10 @@ def retry_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingS
     `finalize_live_meeting` already saved (that pipeline is itself
     resumable: it skips normalization/summary steps that already succeeded,
     so this never redoes work that already completed).
+
+    Syncs `Meeting.status` back to `"processing"` (from `"failed"`) as soon
+    as the retry is accepted, then to `"completed"`/`"failed"` again via
+    `complete_live_meeting`/`fail_live_meeting` once the retry resolves.
     """
     locked = lock_live_session(db, session.id)
     if locked is None:
@@ -421,6 +468,7 @@ def retry_live_meeting(db: Session, session: LiveMeetingSession) -> LiveMeetingS
     locked = _transition(
         db, locked, allowed_sources=("failed",), target="finalizing", error_message=None
     )
+    _sync_meeting_status_for_session(db, locked, "processing")
 
     try:
         run_post_transcription_pipeline(db, locked.meeting_id)

@@ -94,6 +94,41 @@ def _action_item_line(item) -> str:
     return f"{item.text} ({meta})" if meta else item.text
 
 
+def _speaker_prefix(speaker_name: str | None) -> str:
+    return f"{speaker_name}: " if speaker_name else ""
+
+
+def _full_transcript_text(notes: MeetingNotesRead) -> str:
+    """Reconstructs the exported "Full Transcript" as speaker-labeled turns
+    from `timestamped_discussion` (each segment's `speaker_key` already
+    resolved to `speaker_name` — see `app.services.speaker_resolution`),
+    grouping consecutive segments from the same speaker into one paragraph.
+    Falls back to the verbatim `full_transcript` string — unchanged, exactly
+    as `Transcript.transcript`/`normalized_transcript` was produced — when
+    there's nothing to attribute: no segments, or none of them carry a
+    resolved speaker (legacy transcript with no `speaker_key` at all). Never
+    touches the stored transcript text itself either way.
+    """
+    segments = notes.timestamped_discussion
+    if not segments or all(segment.speaker_name is None for segment in segments):
+        return notes.full_transcript
+
+    paragraphs: list[str] = []
+    current_speaker: str | None = segments[0].speaker_name
+    current_lines: list[str] = []
+    for segment in segments:
+        if segment.speaker_name != current_speaker and current_lines:
+            paragraphs.append(f"{_speaker_prefix(current_speaker)}{' '.join(current_lines)}")
+            current_lines = []
+        current_speaker = segment.speaker_name
+        text = segment.text.strip()
+        if text:
+            current_lines.append(text)
+    if current_lines:
+        paragraphs.append(f"{_speaker_prefix(current_speaker)}{' '.join(current_lines)}")
+    return "\n\n".join(paragraphs)
+
+
 def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
     """Composes the shared export content from saved `MeetingNotes` — never
     from a fresh AI re-derivation, so every format reflects exactly what's
@@ -177,14 +212,15 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
             ExportSection(
                 "Detailed Discussion",
                 [
-                    f"[{format_segment_timestamp(segment.start)}] {segment.text}"
+                    f"[{format_segment_timestamp(segment.start)}] "
+                    f"{_speaker_prefix(segment.speaker_name)}{segment.text}"
                     for segment in notes.timestamped_discussion
                 ],
                 kind=SECTION_TIMELINE,
                 items=[
                     {
                         "timestamp": format_segment_timestamp(segment.start),
-                        "text": segment.text,
+                        "text": f"{_speaker_prefix(segment.speaker_name)}{segment.text}",
                     }
                     for segment in notes.timestamped_discussion
                 ],
@@ -193,7 +229,7 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
 
     if notes.full_transcript:
         sections.append(
-            ExportSection("Full Transcript", [notes.full_transcript], kind=SECTION_TRANSCRIPT)
+            ExportSection("Full Transcript", [_full_transcript_text(notes)], kind=SECTION_TRANSCRIPT)
         )
 
     participants_label = (

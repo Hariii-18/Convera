@@ -320,8 +320,10 @@ function MeetingNotesViewer({
 
       <FullTranscript
         transcript={fullTranscript}
+        blocks={detailedDiscussion}
         loading={loading}
         onCopy={onCopyTranscript}
+        onTimestampClick={onTimestampClick}
       />
     </div>
   );

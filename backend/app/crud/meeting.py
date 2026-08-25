@@ -2,21 +2,51 @@ import uuid
 
 from fastapi import status
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
 from app.models.meeting import MEETING_STATUS_TRANSITIONS, Meeting
 from app.schemas.meeting import MeetingCreate, MeetingUpdate
 
+_DUPLICATE_TITLE_MESSAGE = "A meeting with this title already exists."
+
+
+def _title_taken(
+    db: Session, user_id: int, title: str, *, exclude_meeting_id: uuid.UUID | None = None
+) -> bool:
+    """Case-insensitive, whitespace-insensitive duplicate check, scoped to
+    the user's non-deleted meetings (recorded and Live alike -- both live in
+    this same table). `title` is expected already trimmed (see
+    `MeetingCreate`/`MeetingUpdate` validators); `func.lower(func.trim(...))`
+    on the stored side still normalizes existing rows so a pre-existing title
+    with incidental whitespace/casing still collides correctly.
+    """
+    query = db.query(Meeting.id).filter(
+        Meeting.user_id == user_id,
+        Meeting.deleted_at.is_(None),
+        func.lower(func.trim(Meeting.title)) == title.lower(),
+    )
+    if exclude_meeting_id is not None:
+        query = query.filter(Meeting.id != exclude_meeting_id)
+    return db.query(query.exists()).scalar()
+
 
 def create_meeting(db: Session, user_id: int, meeting_in: MeetingCreate) -> Meeting:
+    if _title_taken(db, user_id, meeting_in.title):
+        raise AppError(_DUPLICATE_TITLE_MESSAGE, status.HTTP_409_CONFLICT)
+
     meeting = Meeting(
         user_id=user_id,
         title=meeting_in.title,
         source_type=meeting_in.source_type,
     )
     db.add(meeting)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise AppError(_DUPLICATE_TITLE_MESSAGE, status.HTTP_409_CONFLICT) from exc
     db.refresh(meeting)
     return meeting
 
@@ -53,8 +83,14 @@ def get_meeting_by_id(db: Session, meeting_id: uuid.UUID) -> Meeting | None:
 
 def update_meeting(db: Session, meeting: Meeting, meeting_in: MeetingUpdate) -> Meeting:
     if meeting_in.title is not None:
+        if _title_taken(db, meeting.user_id, meeting_in.title, exclude_meeting_id=meeting.id):
+            raise AppError(_DUPLICATE_TITLE_MESSAGE, status.HTTP_409_CONFLICT)
         meeting.title = meeting_in.title
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise AppError(_DUPLICATE_TITLE_MESSAGE, status.HTTP_409_CONFLICT) from exc
     db.refresh(meeting)
     return meeting
 

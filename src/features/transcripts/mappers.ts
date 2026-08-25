@@ -50,6 +50,9 @@ function toBlocks(
     id: `${transcriptId}-${index}`,
     timestampSeconds: Math.round(segment.start),
     text: segment.text,
+    speaker: segment.speaker_name
+      ? { id: segment.speaker_key ?? segment.speaker_name, name: segment.speaker_name }
+      : undefined,
   }));
 }
 

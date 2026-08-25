@@ -54,6 +54,7 @@ def generate_translated_transcript(
             "start": segment["start"],
             "end": segment["end"],
             "text": translated_text_by_index.get(index) or segment["text"],
+            "speaker_key": segment.get("speaker_key"),
         }
         for index, segment in enumerate(raw_segments)
     ]
