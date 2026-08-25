@@ -21,6 +21,12 @@ class TranscriptSegment:
     start: float
     end: float
     text: str
+    # The stable `MeetingSpeaker.speaker_key` diarization assigned this
+    # segment (`app.services.speaker_alignment_service`), `None` when no
+    # reliable diarization overlap was found. Defaults to `None` so every
+    # existing construction site (providers that predate diarization, or
+    # that never assign one) is unaffected.
+    speaker_key: str | None = None
 
 
 @dataclass

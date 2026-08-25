@@ -44,8 +44,19 @@ from app.models.live_meeting_session import LiveMeetingSession
 from app.models.user import User
 from app.schemas.live_meeting import TERMINAL_LIVE_STATES, LiveMeetingSessionRead
 from app.schemas.meeting import MeetingCreate
+from app.services.diarization.factory import get_diarization_provider
 from app.services.pipeline_service import run_post_transcription_pipeline
+from app.services.speaker_alignment_service import (
+    align_transcript_segments,
+    sync_meeting_speakers_from_keys,
+)
+from app.services.transcription.audio import extract_audio
 from app.services.transcription.base import TranscriptSegment
+
+# Matches `live_transcription_pipeline.SAMPLE_RATE` -- the rate
+# `DiarizationProvider.diarize` (and `extract_audio`) expects a decoded mono
+# waveform at.
+_SAMPLE_RATE = 16000
 
 logger = logging.getLogger("converra")
 
@@ -269,7 +280,10 @@ def _get_or_create_live_placeholder_upload(db: Session, session: LiveMeetingSess
 
 
 def finalize_live_meeting(
-    db: Session, session: LiveMeetingSession, segments: list[TranscriptSegment]
+    db: Session,
+    session: LiveMeetingSession,
+    segments: list[TranscriptSegment],
+    final_audio_bytes: bytes | None = None,
 ) -> LiveMeetingSession:
     """Phase 6: `live/stopping -> stopping -> finalizing -> completed`.
 
@@ -280,6 +294,22 @@ def finalize_live_meeting(
     `segments` is that pipeline's already ordered/deduplicated committed
     transcript (see `LiveTranscriptionPipeline.get_transcript_segments`) —
     this function does no further merging, only persists it.
+
+    Speaker System Part 4: `final_audio_bytes` (from
+    `LiveTranscriptionPipeline.get_raw_audio()`) is the session's complete raw
+    audio, still transiently in memory at this point and about to be dropped
+    — this is the one place a live session gets an authoritative diarization
+    pass over the *entire* recording, exactly like the recorded-upload path
+    (`processing_service.execute_processing_job`): decode, diarize, then
+    `align_transcript_segments` re-assigns every segment's `speaker_key` from
+    that full-session result. This supersedes whatever `speaker_key` each
+    segment carried from the live in-progress pipeline (assigned
+    incrementally, chunk by chunk, so this final pass is strictly more
+    informed). If no audio is available or this pass fails for any reason,
+    each segment's already-assigned `speaker_key` (or `None`) is kept as-is —
+    diarization is an enhancement here too, it must never fail finalization.
+    `MeetingSpeaker` rows are synced from whichever `speaker_key` set ends up
+    persisted, reusing existing rows rather than duplicating them.
 
     Idempotent and bounded: a session already in a terminal state (this
     connection's own prior finalize call, or a fatal-error path that already
@@ -319,6 +349,27 @@ def finalize_live_meeting(
             # call for the same meeting only reaches here if the first one
             # never got this far (it would already be terminal above), so
             # this can't clobber a transcript a prior run already persisted.
+            segments_with_speakers = [asdict(segment) for segment in segments]
+
+            if segments and final_audio_bytes:
+                try:
+                    final_waveform, _duration = extract_audio(
+                        final_audio_bytes, sample_rate=_SAMPLE_RATE
+                    )
+                    diarization_segments = get_diarization_provider().diarize(final_waveform)
+                except Exception:  # noqa: BLE001 (diarization is an enhancement, must never fail finalization)
+                    logger.exception(
+                        "live meeting finalization: final diarization pass failed "
+                        "meeting_id=%s, keeping each segment's incremental speaker_key",
+                        locked.meeting_id,
+                    )
+                else:
+                    segments_with_speakers = align_transcript_segments(segments, diarization_segments)
+
+            speaker_keys = {
+                seg["speaker_key"] for seg in segments_with_speakers if seg["speaker_key"]
+            }
+
             transcript_text = " ".join(segment.text for segment in segments).strip()
             upload_id = _get_or_create_live_placeholder_upload(db, locked)
             upsert_transcript(
@@ -327,10 +378,11 @@ def finalize_live_meeting(
                 upload_id=upload_id,
                 language="en",  # Live Meeting V1 is English-only, per Phase 5.
                 transcript=transcript_text,
-                segments=[asdict(segment) for segment in segments],
+                segments=segments_with_speakers,
                 duration=segments[-1].end if segments else 0.0,
                 word_count=len(transcript_text.split()),
             )
+            sync_meeting_speakers_from_keys(db, locked.meeting_id, speaker_keys)
         run_post_transcription_pipeline(db, locked.meeting_id)
     except Exception as exc:
         logger.exception("live meeting finalization failed meeting_id=%s", locked.meeting_id)

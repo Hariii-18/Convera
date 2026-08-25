@@ -63,5 +63,7 @@ def email(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MeetingNotesEmailResponse:
-    recipient = send_meeting_notes_email(db, meeting_id, current_user, body.format)
-    return MeetingNotesEmailResponse(sent=True, recipient=recipient)
+    recipients = send_meeting_notes_email(
+        db, meeting_id, current_user, body.format, body.send_to_me, body.recipients
+    )
+    return MeetingNotesEmailResponse(sent=True, recipients=recipients)

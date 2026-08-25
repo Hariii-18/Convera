@@ -11,6 +11,11 @@ class TranscriptSegmentRead(BaseModel):
     start: float
     end: float
     text: str
+    # The stable `MeetingSpeaker.speaker_key` diarization assigned this
+    # segment (`app.services.speaker_alignment_service`), `None` when no
+    # reliable diarization overlap was found. Defaults to `None` so
+    # transcripts persisted before this field existed still deserialize.
+    speaker_key: str | None = None
 
 
 class TranscriptNormalize(BaseModel):

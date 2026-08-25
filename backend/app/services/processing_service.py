@@ -2,7 +2,6 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import asdict
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
@@ -26,7 +25,12 @@ from app.db.session import SessionLocal
 from app.models.processing_job import ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
+from app.services.diarization.factory import get_diarization_provider
 from app.services.pipeline_service import run_post_transcription_pipeline
+from app.services.speaker_alignment_service import (
+    align_transcript_segments,
+    sync_meeting_speakers_from_keys,
+)
 from app.services.transcription.base import is_unusable_transcription
 from app.workers.processor import (
     download_upload,
@@ -251,6 +255,26 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Saving transcript", progress=90)
 
+            logger.info("[timing] job %s diarization start", job_id)
+            t0 = time.perf_counter()
+            try:
+                diarization_segments = get_diarization_provider().diarize(waveform)
+            except Exception:  # noqa: BLE001 (diarization is an enhancement, must never fail the job)
+                logger.exception(
+                    "Processing job %s: diarization failed, transcript will save with no speaker_key",
+                    job_id,
+                )
+                diarization_segments = []
+            logger.info(
+                "[timing] job %s diarization end elapsed=%.3fs segments=%d",
+                job_id, time.perf_counter() - t0, len(diarization_segments),
+            )
+
+            segments_with_speakers = align_transcript_segments(result.segments, diarization_segments)
+            speaker_keys = {
+                segment["speaker_key"] for segment in segments_with_speakers if segment["speaker_key"]
+            }
+
             logger.info("[timing] job %s save_transcript start", job_id)
             t0 = time.perf_counter()
             upsert_transcript(
@@ -259,11 +283,12 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 upload_id=job.upload_id,
                 language=result.language,
                 transcript=result.text,
-                segments=[asdict(segment) for segment in result.segments],
+                segments=segments_with_speakers,
                 duration=result.duration,
                 word_count=result.word_count,
                 produced_by_job_id=job.id,
             )
+            sync_meeting_speakers_from_keys(db, job.meeting_id, speaker_keys)
             logger.info("[timing] job %s save_transcript end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         else:
             logger.info(

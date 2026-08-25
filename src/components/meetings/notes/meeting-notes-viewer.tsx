@@ -36,6 +36,7 @@ import type {
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
 import type { MeetingNotesDraft } from "@/features/meeting-notes/mappers";
 import type { MeetingNotesExportFormat } from "@/features/meeting-notes/types";
+import type { MeetingNotesEmailSendPayload } from "@/components/meetings/notes/meeting-notes-email-dialog";
 
 type MeetingNotesViewerProps = React.ComponentProps<"div"> & {
   title?: string;
@@ -71,7 +72,10 @@ type MeetingNotesViewerProps = React.ComponentProps<"div"> & {
   onExportFormatChange?: (format: MeetingNotesExportFormat) => void;
   onDownload?: () => void;
   downloading?: boolean;
-  onSendEmail?: () => void;
+  /** Authenticated user's own address, shown in the email dialog's "Send to
+   * me" option. */
+  ownEmail?: string;
+  onSendEmail?: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
   sendingEmail?: boolean;
 };
 
@@ -115,6 +119,7 @@ function MeetingNotesViewer({
   onExportFormatChange,
   onDownload,
   downloading = false,
+  ownEmail,
   onSendEmail,
   sendingEmail = false,
   ...props
@@ -207,6 +212,7 @@ function MeetingNotesViewer({
           onFormatChange={(format) => onExportFormatChange?.(format)}
           onDownload={onDownload}
           downloading={downloading}
+          ownEmail={ownEmail}
           onSendEmail={onSendEmail}
           sendingEmail={sendingEmail}
         />

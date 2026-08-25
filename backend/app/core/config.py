@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # never the default. See `workers.processor.transcribe_with_fallback`.
     whisper_fallback_model_size: str = "small"
 
+    # Selects the `DiarizationProvider` implementation from
+    # `app.services.diarization.factory`. "mfcc" is CPU-only and needs no
+    # extra model download -- see `mfcc_diarizer`'s module docstring for why
+    # it was chosen over a torch-based neural-embedding provider.
+    diarization_provider: str = "mfcc"
+
     # Selects the `AIProvider` implementation from `app.services.ai.factory`
     # for translation only (see `get_ai_provider`). Only "ollama" is
     # implemented here; "openai", "gemini", "claude" are reserved names for

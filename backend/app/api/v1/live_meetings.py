@@ -119,14 +119,17 @@ def _fail_live_meeting_sync(session: LiveMeetingSession, error_message: str) -> 
 
 
 def _finalize_live_meeting_sync(
-    session: LiveMeetingSession, segments: list
+    session: LiveMeetingSession, segments: list, raw_audio: bytes
 ) -> None:
     """Own short-lived session for Phase 6 finalization, opened only for the
     duration of this call rather than the whole WebSocket connection.
+    `raw_audio` (Speaker System Part 4) lets finalization run one last,
+    authoritative diarization pass over the complete session recording — see
+    `finalize_live_meeting`'s docstring.
     """
     db = SessionLocal()
     try:
-        finalize_live_meeting(db, session, segments)
+        finalize_live_meeting(db, session, segments, final_audio_bytes=raw_audio)
     finally:
         db.close()
 
@@ -154,7 +157,11 @@ async def stream(
         {"type": "stopping"}                  once, after "stop"; socket closes next
         {"type": "transcription_ready"}       once, after the Whisper worker loads
         {"type": "transcript", "sequence",
-         "start", "end", "text"}              one per newly committed transcript segment
+         "start", "end", "text",
+         "speaker_key"}                       one per newly committed transcript segment;
+                                               speaker_key is the stable MeetingSpeaker key
+                                               (Speaker System Part 4) or null if no reliable
+                                               diarization overlap was found -- never a guess
         {"type": "transcription_error",
          "message": str}                      transcription-specific failure; socket stays open
 
@@ -351,7 +358,10 @@ async def stream(
         # `live_worker.py`).
         try:
             await asyncio.to_thread(
-                _finalize_live_meeting_sync, session, pipeline.get_transcript_segments()
+                _finalize_live_meeting_sync,
+                session,
+                pipeline.get_transcript_segments(),
+                pipeline.get_raw_audio(),
             )
         except Exception:
             logger.exception("live-audio ws finalization failed meeting_id=%s", meeting_id)

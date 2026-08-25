@@ -66,12 +66,16 @@ export type MeetingNotesUpdateRequest = {
 
 export type MeetingNotesExportFormat = "pdf" | "docx" | "pptx";
 
-/** Body for `POST /meeting-notes/{meeting_id}/email`. */
+/** Body for `POST /meeting-notes/{meeting_id}/email`. `send_to_me` and
+ * `recipients` are merged and deduplicated server-side into the final send
+ * list — see `backend/app/services/meeting_notes_email_service.py`. */
 export type MeetingNotesEmailRequest = {
   format: MeetingNotesExportFormat;
+  send_to_me: boolean;
+  recipients: string[];
 };
 
 export type MeetingNotesEmailResponse = {
   sent: boolean;
-  recipient: string;
+  recipients: string[];
 };

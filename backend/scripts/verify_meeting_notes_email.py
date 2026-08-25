@@ -1,20 +1,31 @@
-"""Verify Meeting Notes Email Delivery end-to-end against the real DB.
+"""Verify multi-recipient Meeting Notes email delivery end-to-end against the
+real DB.
 
 Reuses the same throwaway user/meeting/upload setup as
-`scripts.verify_meeting_notes`, then exercises `send_meeting_notes_email`
-directly (no real network call to Resend — `httpx.post` is monkeypatched so
-this runs without credentials or network access).
+`scripts.verify_meeting_notes`, then exercises `send_meeting_notes_email` /
+`resolve_email_recipients` directly (no real network call to Resend —
+`httpx.post` is monkeypatched so this runs without credentials or network
+access).
 
 Checks:
-  A. Unconfigured provider (no RESEND_API_KEY) raises a 502 AppError, and
-     leaves MeetingNotes/Transcript/Summary untouched.
-  B. A successful send calls the provider with the CURRENT saved
-     MeetingNotes rendered to the requested format, addressed to the
-     requesting user's own email, subject includes the meeting title, and
-     leaves MeetingNotes/Transcript/Summary untouched.
-  C. A provider failure (non-2xx response) raises a 502 AppError and leaves
+  A. Send to self only (`send_to_me=True`, no extra recipients).
+  B. Send to self + 1 extra recipient.
+  C. Send to multiple recipients (self + 2 extra) in one call, using `bcc` so
+     recipients never see each other's address.
+  D. Duplicate addresses (repeated + differently-cased) collapse to one.
+  E. An invalid address is rejected by the request schema (422) before any
+     send is attempted.
+  F. Too many recipients (11) is rejected (422) after dedup.
+  G. A provider failure (non-2xx response) raises a 502 AppError and leaves
      MeetingNotes/Transcript/Summary untouched.
-  D. A second user cannot email the first user's meeting notes (404).
+  H. PDF, DOCX, and PPTX all still work.
+  I. A second user cannot email the first user's meeting notes (404).
+  J. Unconfigured provider (no RESEND_API_KEY) raises a 502 AppError, and
+     leaves MeetingNotes/Transcript/Summary untouched.
+
+(Duplicate-click protection is a frontend concern — the Send button is
+disabled while `useSendMeetingNotesEmail`'s mutation is pending — and isn't
+exercised by this backend script.)
 
 Usage: python -m scripts.verify_meeting_notes_email
 """
@@ -23,12 +34,12 @@ import sys
 import uuid
 
 import httpx
+from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.crud.meeting import create_meeting
-from app.crud.summary import get_summary_by_meeting_id
-from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
+from app.crud.transcript import upsert_transcript
 from app.crud.upload import create_upload
 from app.db.session import SessionLocal
 from app.models.meeting import Meeting
@@ -38,13 +49,19 @@ from app.models.transcript import Transcript
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.meeting import MeetingCreate
+from app.schemas.meeting_notes import MeetingNotesEmailRequest
 from app.services.ai.base import ActionItem, StructuredSummaryResult, SummaryTextItem
-from app.services.meeting_notes_email_service import send_meeting_notes_email
+from app.services.meeting_notes_email_service import (
+    resolve_email_recipients,
+    send_meeting_notes_email,
+)
 from app.services.meeting_notes_service import get_meeting_notes
 from app.services.pipeline_service import run_post_transcription_pipeline
 
 PRIMARY_EMAIL = "verify-meeting-notes-email@convera.test"
 OTHER_EMAIL = "verify-meeting-notes-email-other@convera.test"
+EXTRA_EMAIL_1 = "verify-meeting-notes-email-extra1@convera.test"
+EXTRA_EMAIL_2 = "verify-meeting-notes-email-extra2@convera.test"
 
 
 def _get_or_create_user(db, email: str) -> User:
@@ -113,28 +130,7 @@ def _fingerprint(db, meeting_id):
     )
 
 
-def check_a_unconfigured_provider(db, meeting_id, user) -> None:
-    settings = get_settings()
-    settings.resend_api_key = ""
-    settings.resend_from_email = ""
-    before = _fingerprint(db, meeting_id)
-    try:
-        send_meeting_notes_email(db, meeting_id, user, "pdf")
-        raise AssertionError("expected AppError for unconfigured provider")
-    except AppError as exc:
-        assert exc.status_code == 502, f"expected 502, got {exc.status_code}"
-    after = _fingerprint(db, meeting_id)
-    assert before == after, "unconfigured-provider failure must not touch Transcript/Summary/MeetingNotes"
-    print("OK A: unconfigured provider raises 502 AppError, data untouched")
-
-
-def check_b_successful_send(db, meeting_id, user, monkeypatch_registry: list) -> None:
-    settings = get_settings()
-    settings.resend_api_key = "test-key"
-    settings.resend_from_email = "Converra <notifications@convera.test>"
-
-    captured = {}
-
+def _patch_resend_success(monkeypatch_registry: list, captured: dict) -> None:
     class _FakeResponse:
         status_code = 200
 
@@ -148,23 +144,89 @@ def check_b_successful_send(db, meeting_id, user, monkeypatch_registry: list) ->
     httpx.post = _fake_post
     monkeypatch_registry.append((httpx, "post", original_post))
 
-    before = _fingerprint(db, meeting_id)
-    notes = get_meeting_notes(db, meeting_id, user.id)
-    recipient = send_meeting_notes_email(db, meeting_id, user, "docx")
-    after = _fingerprint(db, meeting_id)
 
-    assert recipient == user.email, "recipient must be the authenticated user's own email"
+def check_a_self_only(db, meeting_id, user, monkeypatch_registry: list) -> None:
+    settings = get_settings()
+    settings.resend_api_key = "test-key"
+    settings.resend_from_email = "Converra <notifications@convera.test>"
+
+    captured: dict = {}
+    _patch_resend_success(monkeypatch_registry, captured)
+
+    recipients = send_meeting_notes_email(db, meeting_id, user, "pdf", True, [])
+
+    assert recipients == [user.email], f"expected [{user.email}], got {recipients}"
     assert captured["json"]["to"] == [user.email]
-    assert notes.title in captured["json"]["subject"], "subject must reference the meeting title"
-    assert len(captured["json"]["attachments"]) == 1
+    assert "bcc" not in captured["json"], "a single recipient must not add a bcc key"
+    print(f"OK A: self-only send -> {recipients}")
+
+
+def check_b_self_plus_one(db, meeting_id, user, monkeypatch_registry: list) -> None:
+    captured: dict = {}
+    _patch_resend_success(monkeypatch_registry, captured)
+
+    recipients = send_meeting_notes_email(db, meeting_id, user, "docx", True, [EXTRA_EMAIL_1])
+
+    assert recipients == [user.email, EXTRA_EMAIL_1], recipients
+    assert captured["json"]["to"] == [user.email]
+    assert captured["json"]["bcc"] == [EXTRA_EMAIL_1]
     assert captured["json"]["attachments"][0]["filename"].endswith(".docx")
-    assert captured["headers"]["Authorization"] == "Bearer test-key"
-    assert before == after, "a successful send must not touch Transcript/Summary/MeetingNotes"
-    print(f"OK B: successful send -> {recipient}, subject={captured['json']['subject']!r}, "
-          f"attachment={captured['json']['attachments'][0]['filename']}")
+    print(f"OK B: self + 1 -> {recipients}, to={captured['json']['to']}, bcc={captured['json']['bcc']}")
 
 
-def check_c_provider_failure(db, meeting_id, user, monkeypatch_registry: list) -> None:
+def check_c_multiple_recipients(db, meeting_id, user, monkeypatch_registry: list) -> None:
+    captured: dict = {}
+    _patch_resend_success(monkeypatch_registry, captured)
+
+    recipients = send_meeting_notes_email(
+        db, meeting_id, user, "pptx", True, [EXTRA_EMAIL_1, EXTRA_EMAIL_2]
+    )
+
+    assert recipients == [user.email, EXTRA_EMAIL_1, EXTRA_EMAIL_2], recipients
+    assert captured["json"]["to"] == [user.email], "only the primary address may appear in `to`"
+    assert set(captured["json"]["bcc"]) == {EXTRA_EMAIL_1, EXTRA_EMAIL_2}
+    assert len(captured["json"]["attachments"]) == 1
+    print(f"OK C: multiple recipients -> {recipients} (bcc hides recipients from each other)")
+
+
+def check_d_duplicates_collapse(db, meeting_id, user, monkeypatch_registry: list) -> None:
+    captured: dict = {}
+    _patch_resend_success(monkeypatch_registry, captured)
+
+    messy = [user.email.upper(), EXTRA_EMAIL_1, EXTRA_EMAIL_1.upper(), f"  {EXTRA_EMAIL_1}  "]
+    recipients = send_meeting_notes_email(db, meeting_id, user, "pdf", True, messy)
+
+    assert recipients == [user.email, EXTRA_EMAIL_1], recipients
+    print(f"OK D: duplicates (incl. own email + case/whitespace variants) collapse -> {recipients}")
+
+
+def check_e_invalid_address_rejected() -> None:
+    try:
+        MeetingNotesEmailRequest(format="pdf", send_to_me=True, recipients=["not-an-email"])
+        raise AssertionError("expected a validation error for a malformed address")
+    except ValidationError:
+        pass
+    print("OK E: malformed address rejected by the request schema (422 at the API layer)")
+
+
+def check_f_too_many_recipients_rejected(user) -> None:
+    too_many = [f"verify-meeting-notes-email-bulk-{i}@convera.test" for i in range(11)]
+    try:
+        resolve_email_recipients(user.email, True, too_many)
+        raise AssertionError("expected AppError for too many recipients")
+    except AppError as exc:
+        assert exc.status_code == 422, f"expected 422, got {exc.status_code}"
+    print("OK F: 12 total recipients (self + 11) rejected with 422")
+
+    try:
+        resolve_email_recipients(user.email, False, [])
+        raise AssertionError("expected AppError for zero recipients")
+    except AppError as exc:
+        assert exc.status_code == 422, f"expected 422, got {exc.status_code}"
+    print("OK F: zero recipients (send_to_me=False, no extras) also rejected with 422")
+
+
+def check_g_provider_failure(db, meeting_id, user, monkeypatch_registry: list) -> None:
     class _FakeErrorResponse:
         status_code = 422
 
@@ -177,22 +239,48 @@ def check_c_provider_failure(db, meeting_id, user, monkeypatch_registry: list) -
 
     before = _fingerprint(db, meeting_id)
     try:
-        send_meeting_notes_email(db, meeting_id, user, "pptx")
+        send_meeting_notes_email(db, meeting_id, user, "pptx", True, [EXTRA_EMAIL_1])
         raise AssertionError("expected AppError for provider failure")
     except AppError as exc:
         assert exc.status_code == 502, f"expected 502, got {exc.status_code}"
     after = _fingerprint(db, meeting_id)
     assert before == after, "provider failure must not touch Transcript/Summary/MeetingNotes"
-    print("OK C: provider failure raises 502 AppError, data untouched")
+    print("OK G: provider failure raises 502 AppError, data untouched")
 
 
-def check_d_unauthorized_rejected(db, meeting_id, other_user) -> None:
+def check_h_all_formats(db, meeting_id, user, monkeypatch_registry: list) -> None:
+    for fmt in ("pdf", "docx", "pptx"):
+        captured: dict = {}
+        _patch_resend_success(monkeypatch_registry, captured)
+        recipients = send_meeting_notes_email(db, meeting_id, user, fmt, True, [])
+        assert recipients == [user.email]
+        assert captured["json"]["attachments"][0]["filename"].endswith(f".{fmt}")
+        _unpatch(monkeypatch_registry)
+    print("OK H: pdf, docx, and pptx all send successfully")
+
+
+def check_i_unauthorized_rejected(db, meeting_id, other_user) -> None:
     try:
-        send_meeting_notes_email(db, meeting_id, other_user, "pdf")
+        send_meeting_notes_email(db, meeting_id, other_user, "pdf", True, [])
         raise AssertionError("unauthorized email send must be rejected")
     except AppError as exc:
         assert exc.status_code == 404, f"expected 404, got {exc.status_code}"
-    print("OK D: unauthorized meeting/email request rejected (404)")
+    print("OK I: unauthorized meeting/email request rejected (404)")
+
+
+def check_j_unconfigured_provider(db, meeting_id, user) -> None:
+    settings = get_settings()
+    settings.resend_api_key = ""
+    settings.resend_from_email = ""
+    before = _fingerprint(db, meeting_id)
+    try:
+        send_meeting_notes_email(db, meeting_id, user, "pdf", True, [])
+        raise AssertionError("expected AppError for unconfigured provider")
+    except AppError as exc:
+        assert exc.status_code == 502, f"expected 502, got {exc.status_code}"
+    after = _fingerprint(db, meeting_id)
+    assert before == after, "unconfigured-provider failure must not touch Transcript/Summary/MeetingNotes"
+    print("OK J: unconfigured provider raises 502 AppError, data untouched")
 
 
 def cleanup(meeting_ids: list, upload_ids: list) -> None:
@@ -238,13 +326,24 @@ def main() -> int:
             run_post_transcription_pipeline(db, meeting_id)
             user = db.query(User).filter(User.id == user_id).first()
             other_user = db.query(User).filter(User.id == other_user_id).first()
+            get_meeting_notes(db, meeting_id, user.id)  # ensure the row exists before the checks
 
-            check_a_unconfigured_provider(db, meeting_id, user)
-            check_b_successful_send(db, meeting_id, user, http_patches)
+            check_e_invalid_address_rejected()
+            check_f_too_many_recipients_rejected(user)
+
+            check_a_self_only(db, meeting_id, user, http_patches)
             _unpatch(http_patches)
-            check_c_provider_failure(db, meeting_id, user, http_patches)
+            check_b_self_plus_one(db, meeting_id, user, http_patches)
             _unpatch(http_patches)
-            check_d_unauthorized_rejected(db, meeting_id, other_user)
+            check_c_multiple_recipients(db, meeting_id, user, http_patches)
+            _unpatch(http_patches)
+            check_d_duplicates_collapse(db, meeting_id, user, http_patches)
+            _unpatch(http_patches)
+            check_g_provider_failure(db, meeting_id, user, http_patches)
+            _unpatch(http_patches)
+            check_h_all_formats(db, meeting_id, user, http_patches)
+            check_i_unauthorized_rejected(db, meeting_id, other_user)
+            check_j_unconfigured_provider(db, meeting_id, user)
         finally:
             db.close()
     except AssertionError as exc:

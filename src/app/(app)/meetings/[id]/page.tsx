@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
 import { MeetingInfoPanel } from "@/components/meetings/info-panel/meeting-info-panel";
 import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
+import { SpeakersSection } from "@/components/meetings/notes/speakers-section";
 import { MeetingOverview } from "@/components/meetings/overview/meeting-overview";
 import { SummaryViewer } from "@/components/meetings/summary/summary-viewer";
 import { TimelineViewer } from "@/components/meetings/timeline/timeline-viewer";
@@ -48,6 +49,7 @@ import type { MeetingNotesExportFormat } from "@/features/meeting-notes/types";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
+import { useAuthStore } from "@/store/auth-store";
 
 type MeetingPageProps = {
   params: Promise<{ id: string }>;
@@ -56,6 +58,7 @@ type MeetingPageProps = {
 export default function MeetingPage({ params }: MeetingPageProps) {
   const { id } = use(params);
   const router = useRouter();
+  const ownEmail = useAuthStore((state) => state.user?.email);
   const { isGuest, isReady, pendingAction, guard, closeDialog } =
     useGuestGate();
   const guestMeeting = useGuestMeetingsStore((state) => state.getMeeting(id));
@@ -84,10 +87,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   const normalizeTranscript = useNormalizeTranscript(id);
   const translateTranscript = useTranslateTranscript(id);
 
-  const {
-    data: summary,
-    isLoading: isSummaryLoading,
-  } = useSummary(id, {
+  const { data: summary, isLoading: isSummaryLoading } = useSummary(id, {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
@@ -112,7 +112,11 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     if (!meeting) return [];
 
     const items: ActivityItem[] = [
-      { id: "meeting-created", type: "meeting-created", timestamp: meeting.createdAt },
+      {
+        id: "meeting-created",
+        type: "meeting-created",
+        timestamp: meeting.createdAt,
+      },
     ];
 
     if (processingJob) {
@@ -135,15 +139,22 @@ export default function MeetingPage({ params }: MeetingPageProps) {
       }
       if (processingJob.completedAt) {
         items.push({
-          id: processingJob.status === "failed" ? "processing-failed" : "processing-completed",
-          type: processingJob.status === "failed" ? "processing-failed" : "processing-completed",
+          id:
+            processingJob.status === "failed"
+              ? "processing-failed"
+              : "processing-completed",
+          type:
+            processingJob.status === "failed"
+              ? "processing-failed"
+              : "processing-completed",
           timestamp: processingJob.completedAt,
         });
       }
     }
 
     return items.sort(
-      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
     );
   }, [meeting, processingJob]);
 
@@ -161,9 +172,9 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   // Edits are local-only (no persistence endpoint yet); reset whenever the
   // fetched transcript changes so a fresh/retried result isn't shadowed by
   // stale edits made against the previous one.
-  const [editedBlocks, setEditedBlocks] = useState<TranscriptBlockData[] | null>(
-    null,
-  );
+  const [editedBlocks, setEditedBlocks] = useState<
+    TranscriptBlockData[] | null
+  >(null);
   const [lastTranscriptId, setLastTranscriptId] = useState<string | undefined>(
     transcript?.id,
   );
@@ -176,7 +187,9 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     // always defaulting to "en" and hiding it behind a mismatched selector.
     const persistedLanguage = transcript?.translatedLanguage;
     setTranslationLanguage(
-      TRANSLATION_LANGUAGES.some((language) => language.value === persistedLanguage)
+      TRANSLATION_LANGUAGES.some(
+        (language) => language.value === persistedLanguage,
+      )
         ? (persistedLanguage as TranslationLanguage)
         : "en",
     );
@@ -280,14 +293,18 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             durationSeconds={meeting.durationSeconds}
             createdAt={meeting.createdAt}
             onExport={() => toast("Export meeting")}
-            onRename={() => guard("rename-meeting", () => setRenameTarget(meeting))}
+            onRename={() =>
+              guard("rename-meeting", () => setRenameTarget(meeting))
+            }
             onDuplicate={() =>
               guard("manage-meeting", () => toast("Duplicate meeting"))
             }
             onArchive={() =>
               guard("manage-meeting", () => toast("Archive meeting"))
             }
-            onDelete={() => guard("delete-meeting", () => setDeleteTarget(meeting))}
+            onDelete={() =>
+              guard("delete-meeting", () => setDeleteTarget(meeting))
+            }
           />
         }
         navigation={
@@ -344,7 +361,9 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                     : "Transcript copied",
               )
             }
-            emptyTitle={isTranscriptError ? "Couldn't load transcript" : undefined}
+            emptyTitle={
+              isTranscriptError ? "Couldn't load transcript" : undefined
+            }
             emptyDescription={
               isTranscriptError
                 ? "Something went wrong fetching the transcript. Try refreshing the page."
@@ -426,73 +445,92 @@ export default function MeetingPage({ params }: MeetingPageProps) {
           />
         )}
 
-        {activeTab === "notes" && (
-          isMeetingNotesError ? (
+        {activeTab === "notes" &&
+          (isMeetingNotesError ? (
             <EmptyState
               icon={<FileWarning />}
               title="Couldn't load meeting notes"
               description="Something went wrong fetching meeting notes. Try refreshing the page."
             />
           ) : (
-            <MeetingNotesViewer
-              title={meeting.title}
-              dateTimeIst={meetingNotes?.dateTimeIst}
-              durationSeconds={meetingNotes?.durationSeconds ?? meeting.durationSeconds}
-              executiveSummary={meetingNotes?.executiveSummary}
-              discussionTopics={meetingNotes?.discussionTopics}
-              decisions={meetingNotes?.decisions}
-              actionItems={meetingNotes?.actionItems}
-              risks={meetingNotes?.risks}
-              openQuestions={meetingNotes?.openQuestions}
-              nextSteps={meetingNotes?.nextSteps}
-              detailedDiscussion={meetingNotes?.detailedDiscussion}
-              timestampedDiscussion={meetingNotes?.timestampedDiscussion}
-              fullTranscript={meetingNotes?.fullTranscript}
-              loading={isGuest ? false : isMeetingNotesLoading}
-              onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
-              onCopy={() => toast("Meeting notes copied")}
-              onCopyTranscript={() => toast("Transcript copied")}
-              editMode={isGuest ? false : meetingNotesEditMode}
-              onEditModeChange={
-                isGuest || !meetingNotes
-                  ? undefined
-                  : (editMode) =>
-                      guard("manage-meeting", () => setMeetingNotesEditMode(editMode))
-              }
-              saving={updateMeetingNotes.isPending}
-              onSave={(draft) =>
-                updateMeetingNotes.mutate(toMeetingNotesUpdateRequest(draft), {
-                  onSuccess: () => {
-                    setMeetingNotesEditMode(false);
-                    toast.success("Meeting notes saved");
-                  },
-                  onError: (mutationError) =>
-                    toast.error(extractErrorMessage(mutationError)),
-                })
-              }
-              exportFormat={isGuest || !meetingNotes ? undefined : meetingNotesExportFormat}
-              onExportFormatChange={setMeetingNotesExportFormat}
-              downloading={exportMeetingNotes.isPending}
-              onDownload={() =>
-                exportMeetingNotes.mutate(meetingNotesExportFormat, {
-                  onSuccess: (format) => toast.success(`${format.toUpperCase()} downloaded`),
-                  onError: (mutationError) =>
-                    toast.error(extractErrorMessage(mutationError)),
-                })
-              }
-              sendingEmail={sendMeetingNotesEmail.isPending}
-              onSendEmail={() => {
-                if (sendMeetingNotesEmail.isPending) return;
-                sendMeetingNotesEmail.mutate(meetingNotesExportFormat, {
-                  onSuccess: ({ format, recipient }) =>
-                    toast.success(`${format.toUpperCase()} emailed to ${recipient}`),
-                  onError: (mutationError) =>
-                    toast.error(extractErrorMessage(mutationError)),
-                });
-              }}
-            />
-          )
-        )}
+            <div className="flex flex-col gap-6">
+              <MeetingNotesViewer
+                title={meeting.title}
+                dateTimeIst={meetingNotes?.dateTimeIst}
+                durationSeconds={
+                  meetingNotes?.durationSeconds ?? meeting.durationSeconds
+                }
+                executiveSummary={meetingNotes?.executiveSummary}
+                discussionTopics={meetingNotes?.discussionTopics}
+                decisions={meetingNotes?.decisions}
+                actionItems={meetingNotes?.actionItems}
+                risks={meetingNotes?.risks}
+                openQuestions={meetingNotes?.openQuestions}
+                nextSteps={meetingNotes?.nextSteps}
+                detailedDiscussion={meetingNotes?.detailedDiscussion}
+                timestampedDiscussion={meetingNotes?.timestampedDiscussion}
+                fullTranscript={meetingNotes?.fullTranscript}
+                loading={isGuest ? false : isMeetingNotesLoading}
+                onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
+                onCopy={() => toast("Meeting notes copied")}
+                onCopyTranscript={() => toast("Transcript copied")}
+                editMode={isGuest ? false : meetingNotesEditMode}
+                onEditModeChange={
+                  isGuest || !meetingNotes
+                    ? undefined
+                    : (editMode) =>
+                        guard("manage-meeting", () =>
+                          setMeetingNotesEditMode(editMode),
+                        )
+                }
+                saving={updateMeetingNotes.isPending}
+                onSave={(draft) =>
+                  updateMeetingNotes.mutate(
+                    toMeetingNotesUpdateRequest(draft),
+                    {
+                      onSuccess: () => {
+                        setMeetingNotesEditMode(false);
+                        toast.success("Meeting notes saved");
+                      },
+                      onError: (mutationError) =>
+                        toast.error(extractErrorMessage(mutationError)),
+                    },
+                  )
+                }
+                exportFormat={
+                  isGuest || !meetingNotes
+                    ? undefined
+                    : meetingNotesExportFormat
+                }
+                onExportFormatChange={setMeetingNotesExportFormat}
+                downloading={exportMeetingNotes.isPending}
+                onDownload={() =>
+                  exportMeetingNotes.mutate(meetingNotesExportFormat, {
+                    onSuccess: (format) =>
+                      toast.success(`${format.toUpperCase()} downloaded`),
+                    onError: (mutationError) =>
+                      toast.error(extractErrorMessage(mutationError)),
+                  })
+                }
+                ownEmail={ownEmail}
+                sendingEmail={sendMeetingNotesEmail.isPending}
+                onSendEmail={async ({ sendToMe, recipients }) => {
+                  if (sendMeetingNotesEmail.isPending) return;
+                  const result = await sendMeetingNotesEmail.mutateAsync({
+                    format: meetingNotesExportFormat,
+                    sendToMe,
+                    recipients,
+                  });
+                  const count = result.recipients.length;
+                  toast.success(
+                    `${result.format.toUpperCase()} emailed to ${count} recipient${count === 1 ? "" : "s"}`,
+                  );
+                }}
+              />
+
+              {!isGuest && <SpeakersSection meetingId={id} enabled={isReady} />}
+            </div>
+          ))}
 
         {activeTab === "timeline" && (
           <TimelineViewer

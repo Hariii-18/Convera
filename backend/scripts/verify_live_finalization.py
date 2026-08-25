@@ -64,7 +64,9 @@ def main() -> int:
     token = register(email)
 
     # A. start a live session, same as the browser's "Start Live Meeting".
-    resp = client.post("/api/v1/live-meetings/start", headers=auth(token), json={})
+    resp = client.post(
+        "/api/v1/live-meetings/start", headers=auth(token), json={"title": "Verify Live Finalization"}
+    )
     check("A. start returns 201", resp.status_code == 201, resp.text)
     meeting_id = resp.json()["meeting_id"]
 

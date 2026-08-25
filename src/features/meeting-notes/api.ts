@@ -2,6 +2,7 @@ import axios from "axios";
 
 import { apiClient } from "@/lib/api-client";
 import type {
+  MeetingNotesEmailRequest,
   MeetingNotesEmailResponse,
   MeetingNotesExportFormat,
   MeetingNotesResponse,
@@ -74,16 +75,23 @@ export const meetingNotesApi = {
   },
 
   /** Renders the current saved Meeting Notes to `format` and emails it to
-   * the authenticated user's own address (server-derived — this never
-   * accepts an arbitrary recipient).
+   * every resolved recipient in one request: the authenticated user (when
+   * `sendToMe`) plus `recipients`. The backend merges, validates, and
+   * deduplicates the final list — this never lets the caller impersonate a
+   * different authenticated user.
    */
   async sendEmail(
     meetingId: string,
-    format: MeetingNotesExportFormat,
+    payload: { format: MeetingNotesExportFormat; sendToMe: boolean; recipients: string[] },
   ): Promise<MeetingNotesEmailResponse> {
+    const body: MeetingNotesEmailRequest = {
+      format: payload.format,
+      send_to_me: payload.sendToMe,
+      recipients: payload.recipients,
+    };
     const { data } = await apiClient.post<MeetingNotesEmailResponse>(
       `/meeting-notes/${meetingId}/email`,
-      { format },
+      body,
     );
     return data;
   },

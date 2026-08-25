@@ -23,8 +23,15 @@ def send_email_with_attachment(
     text_body: str,
     attachment_content: bytes,
     attachment_filename: str,
+    bcc: list[str] | None = None,
 ) -> None:
-    """Sends a single email with one attachment via Resend.
+    """Sends a single email with one attachment via Resend, optionally BCCing
+    additional recipients.
+
+    `bcc` exists so multi-recipient sends (see
+    `app.services.meeting_notes_email_service`) can go out as one provider
+    call without recipients seeing each other's address — Resend never
+    discloses `bcc` addresses to `to` or to other `bcc` recipients.
 
     Raises `AppError` (502) for anything that keeps the email from being
     sent — missing configuration, a network failure, or a non-2xx response
@@ -50,6 +57,8 @@ def send_email_with_attachment(
             }
         ],
     }
+    if bcc:
+        payload["bcc"] = bcc
 
     try:
         response = httpx.post(

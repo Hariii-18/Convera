@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from app.schemas.summary import SummaryTextItemRead, SummaryTopicRead
 from app.schemas.transcript import TranscriptSegmentRead
@@ -83,10 +83,34 @@ class MeetingNotesUpdate(BaseModel):
     timestamped_discussion: list[TranscriptSegmentRead] | None = None
 
 
+MAX_MEETING_NOTES_EMAIL_RECIPIENTS = 10
+
+
 class MeetingNotesEmailRequest(BaseModel):
+    """Body for `POST /meeting-notes/{meeting_id}/email`. `send_to_me`
+    (default True) adds the authenticated user's own email to the send list
+    without the caller needing to pass it explicitly; `recipients` is any
+    additional addresses. The two are merged, whitespace-trimmed, and
+    deduplicated case-insensitively server-side in
+    `meeting_notes_email_service.resolve_email_recipients` (final list must
+    be 1-`MAX_MEETING_NOTES_EMAIL_RECIPIENTS` addresses) — this schema only
+    validates that each individual address is well-formed. The raw list is
+    capped well above that so an oversized payload fails fast instead of
+    paying per-address validation cost.
+    """
+
     format: Literal["pdf", "docx", "pptx"]
+    send_to_me: bool = True
+    recipients: list[EmailStr] = Field(default_factory=list, max_length=50)
+
+    @field_validator("recipients", mode="before")
+    @classmethod
+    def _strip_recipients(cls, value: object) -> object:
+        if isinstance(value, list):
+            return [item.strip() if isinstance(item, str) else item for item in value]
+        return value
 
 
 class MeetingNotesEmailResponse(BaseModel):
     sent: bool
-    recipient: str
+    recipients: list[str]

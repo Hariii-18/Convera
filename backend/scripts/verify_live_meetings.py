@@ -59,15 +59,20 @@ def main() -> int:
     meeting_ids_to_cleanup: list[str] = []
 
     # A. start -> live
-    resp = client.post("/api/v1/live-meetings/start", headers=auth(token_a), json={})
+    resp = client.post(
+        "/api/v1/live-meetings/start", headers=auth(token_a), json={"title": "Verify Live Meeting A"}
+    )
     check("A. start returns 201", resp.status_code == 201, resp.text)
     body = resp.json()
     check("A. state is 'live'", body.get("state") == "live", body)
     meeting_id = body["meeting_id"]
     meeting_ids_to_cleanup.append(meeting_id)
 
-    # Idempotent double start (same active session, no duplicate meeting)
-    resp2 = client.post("/api/v1/live-meetings/start", headers=auth(token_a), json={})
+    # Idempotent double start (same active session, no duplicate meeting) --
+    # title is ignored for an already-active session, so it need not match.
+    resp2 = client.post(
+        "/api/v1/live-meetings/start", headers=auth(token_a), json={"title": "Verify Live Meeting A (dup)"}
+    )
     check("A2. duplicate start returns same meeting_id", resp2.json()["meeting_id"] == meeting_id, resp2.json())
     check("A2. duplicate start returns same session id", resp2.json()["id"] == body["id"], resp2.json())
 
@@ -104,7 +109,9 @@ def main() -> int:
     # let us re-live it), so test invalid transition directly: stopping a
     # session already in "cancelled"/"failed" state must be rejected. Use a
     # second, dedicated session for this.
-    resp = client.post("/api/v1/live-meetings/start", headers=auth(token_b))
+    resp = client.post(
+        "/api/v1/live-meetings/start", headers=auth(token_b), json={"title": "Verify Live Meeting B"}
+    )
     meeting_id_b = resp.json()["meeting_id"]
     meeting_ids_to_cleanup.append(meeting_id_b)
 

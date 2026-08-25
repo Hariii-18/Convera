@@ -1,8 +1,10 @@
 import * as React from "react";
-import { Loader2, Mail } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
 import { DownloadButton } from "@/components/meetings/downloads/download-button";
+import {
+  MeetingNotesEmailDialog,
+  type MeetingNotesEmailSendPayload,
+} from "@/components/meetings/notes/meeting-notes-email-dialog";
 import {
   Select,
   SelectContent,
@@ -24,17 +26,21 @@ type MeetingNotesExportControlProps = React.ComponentProps<"div"> & {
   onFormatChange: (format: MeetingNotesExportFormat) => void;
   onDownload?: () => void;
   downloading?: boolean;
+  /** Authenticated user's own address, shown in the email dialog's "Send to
+   * me" option. */
+  ownEmail?: string;
   /** Emails the currently saved Meeting Notes (rendered to `format`) to the
-   * authenticated user's own address. Omit to hide/disable the button. */
-  onSendEmail?: () => void;
+   * resolved recipient list from the email dialog. Omit to hide the Send to
+   * Email control entirely. */
+  onSendEmail?: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
   sendingEmail?: boolean;
 };
 
 /**
  * Export control for Meeting Notes: pick a format, then Download (renders
  * the currently saved Meeting Notes server-side and saves the file) or Send
- * to Email (renders the same document server-side and emails it to the
- * authenticated user's own address — see `onSendEmail`).
+ * to Email (opens a small dialog to pick recipients, then renders the same
+ * document server-side and emails it to all of them — see `onSendEmail`).
  */
 function MeetingNotesExportControl({
   className,
@@ -42,6 +48,7 @@ function MeetingNotesExportControl({
   onFormatChange,
   onDownload,
   downloading = false,
+  ownEmail,
   onSendEmail,
   sendingEmail = false,
   ...props
@@ -78,20 +85,13 @@ function MeetingNotesExportControl({
           Download
         </DownloadButton>
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={onSendEmail}
-          disabled={!onSendEmail || sendingEmail}
-        >
-          {sendingEmail ? (
-            <Loader2 data-icon="inline-start" className="animate-spin" />
-          ) : (
-            <Mail data-icon="inline-start" />
-          )}
-          Send to Email
-        </Button>
+        {onSendEmail && (
+          <MeetingNotesEmailDialog
+            ownEmail={ownEmail}
+            sending={sendingEmail}
+            onSend={onSendEmail}
+          />
+        )}
       </div>
     </div>
   );

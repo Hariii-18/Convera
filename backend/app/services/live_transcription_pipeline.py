@@ -29,6 +29,17 @@ chunk boundary), every cycle re-transcribes from `_OVERLAP_SECONDS` before
 the last committed point through the newest audio, then only emits segments
 that extend past what was already committed. This is a segment-level dedup,
 not word-level alignment -- intentionally minimal, per Phase 5 scope.
+
+Speaker System Part 4: every cycle also updates a session-scoped
+`LiveDiarizationSession` (`app.services.diarization.live_session`) with the
+same cumulative waveform already decoded for transcription, and assigns each
+newly committed segment the `speaker_key` its diarized span overlaps most
+via the same `align_transcript_segments` the recorded-upload path uses
+(`app.services.speaker_alignment_service`) -- no separate diarization
+implementation, no per-chunk-independent clustering, and a segment with no
+reliable overlap is left `speaker_key=None` rather than guessed. See
+`live_session.py`'s module docstring for why a session-level cache is needed
+at all instead of calling the batch `DiarizationProvider` per chunk.
 """
 
 from __future__ import annotations
@@ -38,6 +49,8 @@ import logging
 from collections.abc import Awaitable, Callable
 
 from app.core.config import get_settings
+from app.services.diarization.live_session import LiveDiarizationSession
+from app.services.speaker_alignment_service import align_transcript_segments
 from app.services.transcription.audio import AudioExtractionError, extract_audio
 from app.services.transcription.base import TranscriptSegment
 from app.services.transcription.live_worker import LiveTranscriptionWorker
@@ -76,6 +89,7 @@ class LiveTranscriptionPipeline:
         self._send = send
         self._on_fatal_error = on_fatal_error
         self._worker = LiveTranscriptionWorker()
+        self._diarization = LiveDiarizationSession()
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=_MAX_QUEUED_CHUNKS)
         self._task: asyncio.Task | None = None
         self._raw_bytes = bytearray()
@@ -96,11 +110,22 @@ class LiveTranscriptionPipeline:
         return self._ready
 
     def get_transcript_segments(self) -> list[TranscriptSegment]:
-        """The ordered, deduplicated transcript segments committed so far.
-        Safe to call at any point in the pipeline's lifecycle, including
-        after `stop()`.
+        """The ordered, deduplicated transcript segments committed so far,
+        each already carrying the `speaker_key` this session's incremental
+        diarization assigned it. Safe to call at any point in the pipeline's
+        lifecycle, including after `stop()`.
         """
         return list(self._segments)
+
+    def get_raw_audio(self) -> bytes:
+        """The session's raw (still-encoded) audio accepted so far, capped
+        at `_MAX_RAW_BYTES` like everything else in this pipeline. Live
+        audio is never persisted (see `live_meeting_service` module
+        docstring) -- this exists only so finalization can run one last,
+        authoritative diarization pass over the complete session audio
+        (mirrors the recorded-upload path) before this buffer is dropped.
+        """
+        return bytes(self._raw_bytes)
 
     def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -198,6 +223,24 @@ class LiveTranscriptionPipeline:
             return
 
         segments = await self._worker.transcribe(window)
+        if not segments:
+            return
+
+        # Speaker System Part 4: one diarization update per cycle, over the
+        # same cumulative `waveform` already decoded above -- never a fresh,
+        # independent clustering per chunk (see `LiveDiarizationSession`'s
+        # module docstring). Diarization is an enhancement layered on top of
+        # transcription, same as the recorded-upload path
+        # (`processing_service.execute_processing_job`): a failure here must
+        # never break live transcription, it only means this cycle's
+        # segments commit with `speaker_key=None`.
+        try:
+            diarization_segments = await asyncio.to_thread(
+                self._diarization.update, waveform, sample_rate=SAMPLE_RATE
+            )
+        except Exception:
+            logger.exception("live-diarization update failed; committing this cycle with speaker_key=None")
+            diarization_segments = []
 
         for segment in segments:
             abs_start = window_start + segment.start
@@ -217,17 +260,31 @@ class LiveTranscriptionPipeline:
             text = segment.text.strip()
             if not text:
                 continue
+
+            start = round(abs_start, 2)
+            end = round(abs_end, 2)
+            # `align_transcript_segments` is the exact same function the
+            # recorded-upload path uses (`speaker_alignment_service`) --
+            # overlap-matches this one segment against the diarization
+            # segments accumulated so far and returns `speaker_key=None`
+            # (never a guess) when there's no reliable overlap.
+            [aligned] = align_transcript_segments(
+                [TranscriptSegment(start=start, end=end, text=text)], diarization_segments
+            )
+            speaker_key = aligned["speaker_key"]
+
             await self._send(
                 {
                     "type": "transcript",
                     "sequence": self._next_sequence,
-                    "start": round(abs_start, 2),
-                    "end": round(abs_end, 2),
+                    "start": start,
+                    "end": end,
                     "text": text,
+                    "speaker_key": speaker_key,
                 }
             )
             self._segments.append(
-                TranscriptSegment(start=round(abs_start, 2), end=round(abs_end, 2), text=text)
+                TranscriptSegment(start=start, end=end, text=text, speaker_key=speaker_key)
             )
             self._next_sequence += 1
             self._committed_until = max(self._committed_until, abs_end)
