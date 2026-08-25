@@ -10,6 +10,10 @@ import { ConversationView } from "@/components/meetings/conversation/conversatio
 import { DownloadsPanel } from "@/components/meetings/downloads/downloads-panel";
 import type { ExportCardData, ExportFormat } from "@/components/meetings/downloads/types";
 import { MeetingInfoPanel } from "@/components/meetings/info-panel/meeting-info-panel";
+import type {
+  ProcessingInfoData,
+  RecordingInfoData,
+} from "@/components/meetings/info-panel/types";
 import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
 import { SpeakersSection } from "@/components/meetings/notes/speakers-section";
 import { MeetingOverview } from "@/components/meetings/overview/meeting-overview";
@@ -27,15 +31,22 @@ import { PageContainer } from "@/components/layout/page-container";
 import { RenameMeetingDialog } from "@/components/meetings/rename-meeting-dialog";
 import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog";
 import type { Meeting } from "@/components/meetings/types";
-import type { ActionItemData } from "@/components/meetings/summary/types";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
-import type { ActivityItem } from "@/components/meetings/overview/types";
+import type {
+  ActivityItem,
+  MeetingStatisticsData,
+  RecordingInfo as OverviewRecordingInfo,
+  TimelineEventPreview,
+} from "@/components/meetings/overview/types";
+import { formatTimestamp } from "@/components/meetings/format";
 import { extractErrorMessage } from "@/features/auth/error";
 import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
 import { useRetryProcessing } from "@/features/processing/hooks/use-retry-processing";
+import { isTerminalStatus } from "@/features/processing/mappers";
+import { useUploads } from "@/features/uploads/hooks/use-uploads";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
@@ -50,6 +61,7 @@ import type {
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useTimeline } from "@/features/timeline/hooks/use-timeline";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
+import { useUpdateActionItem } from "@/features/summaries/hooks/use-update-action-item";
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
 import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
 import { useExportMeetingNotes } from "@/features/meeting-notes/hooks/use-export-meeting-notes";
@@ -60,10 +72,53 @@ import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
 import { useGuestGate } from "@/features/guest/use-guest-gate";
 import { useGuestMeetingsStore } from "@/features/guest/guest-meetings-store";
 import { useAuthStore } from "@/store/auth-store";
+import type { ProcessingJob } from "@/features/processing/mappers";
 
 type MeetingPageProps = {
   params: Promise<{ id: string }>;
 };
+
+/** Seconds between a job's start and completion, or `undefined` if either is missing. */
+function deriveProcessingTimeSeconds(
+  job: ProcessingJob | null | undefined,
+): number | undefined {
+  if (!job?.startedAt || !job?.completedAt) return undefined;
+  const seconds =
+    (new Date(job.completedAt).getTime() - new Date(job.startedAt).getTime()) / 1000;
+  return seconds >= 0 ? seconds : undefined;
+}
+
+/**
+ * The backend has no explicit transcript/summary status field — it's
+ * inferred here from whether the artifact exists plus the processing job's
+ * status, matching the pipeline's actual lifecycle
+ * (`app/services/pipeline_service.py`: transcript persists first, then
+ * normalize/summary/timeline run before the job reaches a terminal state).
+ */
+function deriveArtifactStatus<T extends string>(
+  hasArtifact: boolean,
+  job: ProcessingJob | null | undefined,
+  generatedLabel: T,
+  inProgressLabel: T,
+  failedLabel: T,
+  pendingLabel: T,
+): T | undefined {
+  if (hasArtifact) return generatedLabel;
+  if (!job) return undefined;
+  if (!isTerminalStatus(job.status)) return inProgressLabel;
+  return job.status === "failed" ? failedLabel : pendingLabel;
+}
+
+/**
+ * The backend never records a "screen recording" kind — uploads are
+ * audio/video files and Live Meeting captures audio only (see
+ * `_LIVE_PLACEHOLDER_MIME_TYPE` in `live_meeting_service.py`) — so this only
+ * ever resolves to "audio" or "video", never the third `RecordingType` case.
+ */
+function deriveRecordingType(mimeType: string | undefined): "audio" | "video" | undefined {
+  if (!mimeType) return undefined;
+  return mimeType.startsWith("video/") ? "video" : "audio";
+}
 
 export default function MeetingPage({ params }: MeetingPageProps) {
   const { id } = use(params);
@@ -85,6 +140,17 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   const { data: processingJob, isLoading: isProcessingJobLoading } =
     useProcessingJob(id, { enabled: isReady && !isGuest });
   const retryProcessing = useRetryProcessing();
+
+  // The upload behind this meeting's recording. Not looked up via
+  // `processingJob.uploadId` — Live Meeting finalization persists a
+  // transcript straight through `run_post_transcription_pipeline` without
+  // ever creating a `ProcessingJob` row (see `live_meeting_service.
+  // finalize_live_meeting`), so a live meeting would never have a
+  // processing job to key off of. `Upload.meeting_id` is always set
+  // correctly on both paths, so matching on that covers both; uploads are
+  // returned newest-first, so the first match is the current recording.
+  const { data: uploads } = useUploads({ enabled: isReady && !isGuest });
+  const recordingUpload = uploads?.find((upload) => upload.meetingId === id);
 
   const {
     data: transcript,
@@ -181,6 +247,79 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     );
   }, [meeting, processingJob]);
 
+  // Meeting.duration_seconds is never populated by the backend today (see
+  // app/models/meeting.py — no write path sets it); the transcript's own
+  // duration is the real fallback, same as `meeting_notes_service` uses.
+  const recordingDurationSeconds =
+    meeting?.durationSeconds ??
+    (transcript?.duration != null ? Math.round(transcript.duration) : null);
+
+  const recordingType = deriveRecordingType(recordingUpload?.mimeType);
+
+  const overviewStatistics: MeetingStatisticsData = {
+    transcriptWordCount: transcript?.wordCount,
+    processingTimeSeconds: deriveProcessingTimeSeconds(processingJob),
+    summaryStatus: deriveArtifactStatus(
+      Boolean(summary),
+      processingJob,
+      "generated",
+      "generating",
+      "failed",
+      "pending",
+    ),
+    recordingSizeBytes: recordingUpload?.sizeBytes,
+  };
+
+  // `audioQuality` (e.g. "High · 48kHz") has no backend source — the upload
+  // record carries no bitrate/sample-rate data — so it's left unset rather
+  // than invented.
+  const overviewRecording: OverviewRecordingInfo | undefined = recordingType
+    ? { type: recordingType, durationSeconds: recordingDurationSeconds }
+    : undefined;
+
+  const timelinePreviewEvents = useMemo<TimelineEventPreview[]>(
+    () =>
+      (timelineEvents ?? []).map((event) => ({
+        id: event.id,
+        label: event.title,
+        timeLabel: formatTimestamp(event.timestampSeconds),
+        description: event.description,
+      })),
+    [timelineEvents],
+  );
+
+  // Participants/tags have no backing data: `Meeting.participants_count` is
+  // just a count (no names/ids to render as a roster), and the backend has
+  // no tags concept at all — so `MeetingInfoPanel` gets neither, rather than
+  // fabricated entries.
+  const infoPanelRecording: RecordingInfoData | undefined = recordingType
+    ? {
+        type: recordingType,
+        durationSeconds: recordingDurationSeconds,
+        sizeBytes: recordingUpload?.sizeBytes,
+      }
+    : undefined;
+
+  const infoPanelProcessing: ProcessingInfoData = {
+    processingTimeSeconds: deriveProcessingTimeSeconds(processingJob),
+    transcriptStatus: deriveArtifactStatus(
+      Boolean(transcript),
+      processingJob,
+      "completed",
+      "processing",
+      "failed",
+      "pending",
+    ),
+    summaryStatus: deriveArtifactStatus(
+      Boolean(summary),
+      processingJob,
+      "generated",
+      "generating",
+      "failed",
+      "pending",
+    ),
+  };
+
   const [activeTab, setActiveTab] = useState<WorkspaceTabValue>("overview");
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
@@ -229,20 +368,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
         ? (transcript?.translatedBlocks ?? [])
         : transcriptBlocks;
 
-  // Action item completion toggles are local-only (no persistence endpoint
-  // yet); reset whenever a fresh/regenerated summary comes in so stale
-  // toggles from the previous summary don't shadow it.
-  const [editedActionItems, setEditedActionItems] = useState<
-    ActionItemData[] | null
-  >(null);
-  const [lastSummaryId, setLastSummaryId] = useState<string | undefined>(
-    summary?.id,
-  );
-  if (summary?.id !== lastSummaryId) {
-    setLastSummaryId(summary?.id);
-    setEditedActionItems(null);
-  }
-  const actionItems = editedActionItems ?? summary?.actionItems ?? [];
+  const updateActionItem = useUpdateActionItem(id);
+  const actionItems = summary?.actionItems ?? [];
 
   const [timelineSearch, setTimelineSearch] = useState("");
   const [timelineExpanded, setTimelineExpanded] = useState(false);
@@ -366,7 +493,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
           <WorkspaceNavigation value={activeTab} onValueChange={setActiveTab} />
         }
         activeTab={activeTab}
-        sidePanel={<MeetingInfoPanel />}
+        sidePanel={
+          <MeetingInfoPanel
+            recording={isGuest ? undefined : infoPanelRecording}
+            processing={isGuest ? undefined : infoPanelProcessing}
+          />
+        }
       >
         {activeTab === "overview" && (
           <MeetingOverview
@@ -377,6 +509,10 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               createdAt: meeting.createdAt,
               updatedAt: meeting.updatedAt,
             }}
+            statistics={isGuest ? undefined : overviewStatistics}
+            recording={isGuest ? undefined : overviewRecording}
+            summary={isGuest ? undefined : summary?.executiveSummary}
+            timelineEvents={isGuest ? undefined : timelinePreviewEvents}
             activity={activity}
             processingJob={isGuest ? null : processingJob}
             processingJobLoading={isGuest ? false : isProcessingJobLoading}
@@ -519,21 +655,56 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               isGuest ? false : isSummaryLoading || regenerateSummary.isPending
             }
             onToggleActionItem={(itemId) =>
-              setEditedActionItems(
-                actionItems.map((item) =>
-                  item.id === itemId
-                    ? {
-                        ...item,
-                        // Un-completing clears status back to unknown rather
-                        // than asserting "not started" — that's not
-                        // something the toggle (or the transcript) actually
-                        // established.
-                        status:
-                          item.status === "completed" ? undefined : "completed",
-                      }
-                    : item,
-                ),
-              )
+              guard("manage-meeting", () => {
+                const index = actionItems.findIndex((item) => item.id === itemId);
+                if (index === -1) return;
+                const item = actionItems[index];
+                if (!item) return;
+                updateActionItem.mutate(
+                  {
+                    index,
+                    payload: {
+                      // Un-completing clears status back to unknown rather
+                      // than asserting "not started" — that's not
+                      // something the toggle (or the transcript) actually
+                      // established.
+                      status: item.status === "completed" ? null : "completed",
+                    },
+                  },
+                  {
+                    onSuccess: () => toast.success("Action item updated"),
+                    onError: (mutationError) =>
+                      toast.error(extractErrorMessage(mutationError)),
+                  },
+                );
+              })
+            }
+            onSaveActionItem={(itemId, edits) =>
+              guard("manage-meeting", () => {
+                const index = actionItems.findIndex((item) => item.id === itemId);
+                if (index === -1) return;
+                updateActionItem.mutate(
+                  {
+                    index,
+                    payload: {
+                      text: edits.text,
+                      owner: edits.owner,
+                      due_date: edits.dueDate,
+                      status: edits.status,
+                    },
+                  },
+                  {
+                    onSuccess: () => toast.success("Action item updated"),
+                    onError: (mutationError) =>
+                      toast.error(extractErrorMessage(mutationError)),
+                  },
+                );
+              })
+            }
+            pendingActionItemId={
+              updateActionItem.isPending
+                ? (actionItems[updateActionItem.variables?.index ?? -1]?.id ?? null)
+                : null
             }
             onCopy={() => toast("Summary copied")}
             onExport={() => toast("Export summary")}

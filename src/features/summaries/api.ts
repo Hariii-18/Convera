@@ -1,7 +1,10 @@
 import axios from "axios";
 
 import { apiClient } from "@/lib/api-client";
-import type { SummaryResponse } from "@/features/summaries/types";
+import type {
+  SummaryActionItemUpdateRequest,
+  SummaryResponse,
+} from "@/features/summaries/types";
 
 export const summariesApi = {
   /** Returns `null` when the meeting has no summary yet (404) rather than throwing. */
@@ -24,6 +27,24 @@ export const summariesApi = {
     const { data } = await apiClient.post<SummaryResponse>("/summaries", {
       meeting_id: meetingId,
     });
+    return data;
+  },
+
+  /**
+   * Persists a status/owner/due_date/text edit to one action item,
+   * identified by its position in `action_items`. Returns the full,
+   * updated summary so the caller can reseed its cache without a refetch.
+   */
+  async updateActionItem(
+    meetingId: string,
+    index: number,
+    payload: SummaryActionItemUpdateRequest,
+  ): Promise<SummaryResponse> {
+    const { data } = await apiClient.patch<SummaryResponse>(
+      `/summaries/action-items/${index}`,
+      payload,
+      { params: { meeting_id: meetingId } },
+    );
     return data;
   },
 };

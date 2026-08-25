@@ -13,6 +13,7 @@ import { Risks } from "@/components/meetings/summary/risks";
 import { SummaryToolbar } from "@/components/meetings/summary/summary-toolbar";
 import { countWords } from "@/components/meetings/format";
 import { buildSummaryText } from "@/components/meetings/summary/format";
+import type { ActionItemEdits } from "@/components/meetings/summary/edit-action-item-dialog";
 import type {
   ActionItemData,
   DecisionData,
@@ -33,6 +34,11 @@ type SummaryViewerProps = React.ComponentProps<"div"> & {
   /** Renders every section's skeleton state. */
   loading?: boolean;
   onToggleActionItem?: (id: string) => void;
+  /** Persists a text/owner/due date/status edit made through the action
+   * item edit dialog. Omit to hide the edit affordance. */
+  onSaveActionItem?: (id: string, edits: ActionItemEdits) => void;
+  /** Id of the action item currently being saved, if any. */
+  pendingActionItemId?: string | null;
   onCopy?: () => void;
   /** Presentational placeholder — the caller owns what exporting actually does. */
   onExport?: () => void;
@@ -57,6 +63,8 @@ function SummaryViewer({
   nextSteps,
   loading = false,
   onToggleActionItem,
+  onSaveActionItem,
+  pendingActionItemId,
   onCopy,
   onExport,
   onRegenerate,
@@ -107,6 +115,8 @@ function SummaryViewer({
         items={actionItems}
         loading={loading}
         onToggleActionItem={onToggleActionItem}
+        onSaveActionItem={onSaveActionItem}
+        pendingItemId={pendingActionItemId}
       />
       <Risks risks={risks} loading={loading} />
       <OpenQuestions questions={openQuestions} loading={loading} />

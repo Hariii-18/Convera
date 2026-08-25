@@ -5,9 +5,11 @@ from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
-from app.crud.summary import upsert_summary
+from app.crud.meeting import get_meeting
+from app.crud.summary import get_summary_by_meeting_id, update_action_item, upsert_summary
 from app.crud.transcript import get_transcript_by_meeting_id
 from app.models.summary import Summary
+from app.schemas.summary import SummaryActionItemUpdate
 from app.services.ai.factory import get_summary_ai_provider
 
 
@@ -57,3 +59,31 @@ def generate_summary(db: Session, meeting_id: uuid.UUID) -> Summary:
         open_questions=[asdict(question) for question in result.open_questions],
         next_steps=[asdict(step) for step in result.next_steps],
     )
+
+
+def update_summary_action_item(
+    db: Session,
+    meeting_id: uuid.UUID,
+    user_id: int,
+    index: int,
+    payload: SummaryActionItemUpdate,
+) -> Summary:
+    """Ownership-checked partial edit of one `Summary.action_items` entry
+    (status/owner/due_date/text). Never touches `executive_summary`/`topics`/
+    `decisions`/.../`timeline_events` on the row, the transcript, Meeting
+    Notes, or the AI generation path — this only ever reaches
+    `crud.summary.update_action_item`, a plain field assignment.
+    """
+    if get_meeting(db, meeting_id, user_id) is None:
+        raise AppError("Meeting not found", status.HTTP_404_NOT_FOUND)
+
+    summary = get_summary_by_meeting_id(db, meeting_id)
+    if summary is None:
+        raise AppError("Summary not found", status.HTTP_404_NOT_FOUND)
+
+    updated = update_action_item(
+        db, summary, index, payload.model_dump(exclude_unset=True)
+    )
+    if updated is None:
+        raise AppError("Action item not found", status.HTTP_404_NOT_FOUND)
+    return updated

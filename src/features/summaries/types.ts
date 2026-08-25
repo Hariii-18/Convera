@@ -13,10 +13,29 @@ export type SummaryTextItemResponse = {
   text: string;
 };
 
+/** Mirrors `app.schemas.summary.ActionItemStatus` — explicit allowed values
+ * only, never inferred. */
+export type SummaryActionItemStatusResponse =
+  | "not-started"
+  | "in-progress"
+  | "completed"
+  | "blocked";
+
 export type SummaryActionItemResponse = {
   text: string;
   owner: string | null;
   due_date: string | null;
+  status: SummaryActionItemStatusResponse | null;
+};
+
+/** Body for `PATCH /summaries/action-items/{index}`. Every field is
+ * optional — only the ones supplied are changed (mirrors
+ * `MeetingNotesActionItemInput`'s partial-update contract on the backend). */
+export type SummaryActionItemUpdateRequest = {
+  text?: string;
+  owner?: string | null;
+  due_date?: string | null;
+  status?: SummaryActionItemStatusResponse | null;
 };
 
 export type SummaryResponse = {

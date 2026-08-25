@@ -10,8 +10,8 @@ from app.crud.summary import get_summary_by_meeting_id
 from app.db.session import get_db
 from app.models.summary import Summary
 from app.models.user import User
-from app.schemas.summary import SummaryGenerate, SummaryRead
-from app.services.summary_service import generate_summary
+from app.schemas.summary import SummaryActionItemUpdate, SummaryGenerate, SummaryRead
+from app.services.summary_service import generate_summary, update_summary_action_item
 
 router = APIRouter(prefix="/summaries", tags=["summaries"])
 
@@ -41,3 +41,19 @@ def generate(
         raise AppError("Meeting not found", status.HTTP_404_NOT_FOUND)
 
     return generate_summary(db, payload.meeting_id)
+
+
+@router.patch("/action-items/{index}", response_model=SummaryRead)
+def update_action_item(
+    index: int,
+    payload: SummaryActionItemUpdate,
+    meeting_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Summary:
+    """Persists a status/owner/due_date/text edit to one action item. Scoped
+    to a single `action_items` entry — never touches the rest of the
+    Summary row, the transcript, or Meeting Notes (see
+    `services.summary_service.update_summary_action_item`).
+    """
+    return update_summary_action_item(db, meeting_id, current_user.id, index, payload)

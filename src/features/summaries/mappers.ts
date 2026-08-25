@@ -42,9 +42,9 @@ export function toSummary(response: SummaryResponse): Summary {
       assignee: item.owner ? { id: item.owner, name: item.owner } : undefined,
       dueDate: item.due_date ?? undefined,
       // Never inferred: the backend doesn't produce a status for AI-sourced
-      // action items (see `MeetingNotesActionItemRead`), so this starts
-      // unset until a user explicitly toggles completion.
-      status: undefined,
+      // action items — this reflects `PATCH /summaries/action-items/{index}`
+      // once a user has explicitly set one, and stays unset until then.
+      status: item.status ?? undefined,
     })),
     risks: response.risks.map((risk, index) => ({
       id: `${response.id}-risk-${index}`,

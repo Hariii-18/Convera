@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -17,10 +18,36 @@ class SummaryTextItemRead(BaseModel):
     text: str
 
 
+# Explicit allowed values only — never inferred (e.g. defaulted to
+# "not-started") for an item nothing has stated a status for. Mirrors the
+# frontend's `ActionItemStatus` (`src/components/meetings/summary/types.ts`).
+ActionItemStatus = Literal["not-started", "in-progress", "completed", "blocked"]
+
+
 class SummaryActionItemRead(BaseModel):
     text: str
     owner: str | None = None
     due_date: str | None = None
+    # Never produced by the AI provider (`generate_structured_summary`) —
+    # stays unset until a user explicitly sets one via `PATCH
+    # /summaries/action-items/{index}`.
+    status: ActionItemStatus | None = None
+
+
+class SummaryActionItemUpdate(BaseModel):
+    """Partial edit for one `Summary.action_items` entry, identified by its
+    position in the list (see `PATCH /summaries/action-items/{index}`). Only
+    fields the client actually sends are changed (`exclude_unset`, applied in
+    `crud.summary.update_action_item`) — omitting a field keeps its current
+    stored value, while sending it as `null` clears it. `text` is the one
+    exception: it's never cleared to `null` since it's required content, not
+    an optional annotation (see `update_action_item`).
+    """
+
+    text: str | None = None
+    owner: str | None = None
+    due_date: str | None = None
+    status: ActionItemStatus | None = None
 
 
 class TimelineEventRead(BaseModel):

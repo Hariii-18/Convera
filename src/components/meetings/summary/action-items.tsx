@@ -1,7 +1,8 @@
 import * as React from "react";
-import { CalendarDays, ListChecks } from "lucide-react";
+import { CalendarDays, ListChecks, Pencil } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -9,6 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { formatDate } from "@/components/meetings/format";
 import { actionItemStatusConfig } from "@/components/meetings/summary/action-item-status";
+import {
+  EditActionItemDialog,
+  type ActionItemEdits,
+} from "@/components/meetings/summary/edit-action-item-dialog";
 import { cn } from "@/lib/utils";
 import type { ActionItemData } from "@/components/meetings/summary/types";
 
@@ -17,6 +22,13 @@ type ActionItemsProps = React.ComponentProps<"div"> & {
   loading?: boolean;
   /** Controlled — the caller owns whether toggling changes `status`. */
   onToggleActionItem?: (id: string) => void;
+  /** Controlled — the caller owns persisting text/owner/due date/status
+   * edits made through the per-item edit dialog. Omit to hide the edit
+   * affordance entirely. */
+  onSaveActionItem?: (id: string, edits: ActionItemEdits) => void;
+  /** Id of the item currently being saved (toggle or edit), if any —
+   * disables that item's controls and shows a "Saving…" indicator. */
+  pendingItemId?: string | null;
 };
 
 /**
@@ -32,8 +44,13 @@ function ActionItems({
   items = [],
   loading = false,
   onToggleActionItem,
+  onSaveActionItem,
+  pendingItemId = null,
   ...props
 }: ActionItemsProps) {
+  const [editingItemId, setEditingItemId] = React.useState<string | null>(null);
+  const editingItem = items.find((item) => item.id === editingItemId) ?? null;
+
   return (
     <Card data-slot="action-items" className={cn(className)} {...props}>
       <CardHeader>
@@ -66,6 +83,7 @@ function ActionItems({
               const checkboxId = `action-item-${item.id}`;
               const metaId = `action-item-meta-${item.id}`;
               const hasMeta = Boolean(item.assignee || item.dueDate);
+              const isPending = pendingItemId === item.id;
 
               return (
                 <li
@@ -75,7 +93,7 @@ function ActionItems({
                   <Checkbox
                     id={checkboxId}
                     checked={checked}
-                    disabled={!onToggleActionItem}
+                    disabled={!onToggleActionItem || isPending}
                     onCheckedChange={() => onToggleActionItem?.(item.id)}
                     aria-describedby={hasMeta ? metaId : undefined}
                     className="mt-0.5"
@@ -93,7 +111,7 @@ function ActionItems({
                       {item.text}
                     </label>
 
-                    {hasMeta && (
+                    {(hasMeta || isPending) && (
                       <div
                         id={metaId}
                         className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-muted-foreground"
@@ -117,6 +135,7 @@ function ActionItems({
                             {formatDate(item.dueDate)}
                           </span>
                         )}
+                        {isPending && <span>Saving…</span>}
                       </div>
                     )}
                   </div>
@@ -126,12 +145,40 @@ function ActionItems({
                       {statusConfig.label}
                     </StatusBadge>
                   )}
+
+                  {onSaveActionItem && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label="Edit action item"
+                      disabled={isPending}
+                      onClick={() => setEditingItemId(item.id)}
+                    >
+                      <Pencil />
+                    </Button>
+                  )}
                 </li>
               );
             })}
           </ul>
         )}
       </CardContent>
+
+      {onSaveActionItem && (
+        <EditActionItemDialog
+          item={editingItem}
+          isPending={editingItem ? pendingItemId === editingItem.id : false}
+          onOpenChange={(open) => {
+            if (!open) setEditingItemId(null);
+          }}
+          onSave={(edits) => {
+            if (!editingItem) return;
+            onSaveActionItem(editingItem.id, edits);
+            setEditingItemId(null);
+          }}
+        />
+      )}
     </Card>
   );
 }
