@@ -1,6 +1,7 @@
 import uuid
+from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
@@ -11,6 +12,7 @@ from app.db.session import get_db
 from app.models.summary import Summary
 from app.models.user import User
 from app.schemas.summary import SummaryActionItemUpdate, SummaryGenerate, SummaryRead
+from app.services.export.export_service import export_summary
 from app.services.summary_service import generate_summary, update_summary_action_item
 
 router = APIRouter(prefix="/summaries", tags=["summaries"])
@@ -57,3 +59,20 @@ def update_action_item(
     `services.summary_service.update_summary_action_item`).
     """
     return update_summary_action_item(db, meeting_id, current_user.id, index, payload)
+
+
+@router.get("/{meeting_id}/export")
+def export(
+    meeting_id: uuid.UUID,
+    format: Literal["pdf", "docx", "pptx"] = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    content, filename, content_type = export_summary(
+        db, meeting_id, current_user.id, format
+    )
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

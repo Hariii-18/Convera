@@ -1,7 +1,10 @@
 import type { AxiosProgressEvent } from "axios";
 
 import { apiClient } from "@/lib/api-client";
-import type { UploadResponse } from "@/features/uploads/types";
+import type {
+  UploadPlaybackResponse,
+  UploadResponse,
+} from "@/features/uploads/types";
 
 type UploadFileOptions = {
   meetingId: string;
@@ -17,6 +20,13 @@ export const uploadsApi = {
 
   async get(id: string): Promise<UploadResponse> {
     const { data } = await apiClient.get<UploadResponse>(`/uploads/${id}`);
+    return data;
+  },
+
+  async getPlaybackUrl(id: string): Promise<UploadPlaybackResponse> {
+    const { data } = await apiClient.get<UploadPlaybackResponse>(
+      `/uploads/${id}/playback`,
+    );
     return data;
   },
 

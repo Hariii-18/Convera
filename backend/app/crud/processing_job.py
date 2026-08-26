@@ -127,6 +127,18 @@ def mark_job_failed(
     return job
 
 
+def mark_job_cancelled(db: Session, job: ProcessingJob, *, commit: bool = True) -> ProcessingJob:
+    job.status = "cancelled"
+    job.stage = "Cancelled"
+    job.completed_at = datetime.now(timezone.utc)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
+    return job
+
+
 def reset_job_for_retry(db: Session, job: ProcessingJob) -> ProcessingJob:
     job.status = "queued"
     job.stage = "Queued"

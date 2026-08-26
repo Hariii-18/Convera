@@ -1,4 +1,4 @@
-import { formatDuration } from "@/components/meetings/format";
+import { formatDuration, formatDueDate } from "@/components/meetings/format";
 import type {
   DecisionData,
   DiscussionTopicData,
@@ -16,19 +16,12 @@ const MONTH_NAMES = [
 /**
  * Action-item due dates come from the summarization prompt as free-text
  * (not guaranteed to be ISO-parseable — see `due_date` on
- * `MeetingNotesActionItemRead`). Formats it as a date when it parses
- * cleanly; otherwise renders the recorded text as-is rather than an
- * "Invalid Date" string.
+ * `MeetingNotesActionItemRead`). Delegates to the shared `formatDueDate`,
+ * which renders a bare calendar date (`YYYY-MM-DD`) unaffected by
+ * timezone and falls back to the recorded text as-is when it doesn't parse.
  */
 export function formatActionItemDueDate(dueDate: string): string {
-  const parsed = new Date(dueDate);
-  if (Number.isNaN(parsed.getTime())) return dueDate;
-
-  return parsed.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return formatDueDate(dueDate);
 }
 
 /**

@@ -25,6 +25,7 @@ import logging
 import multiprocessing as mp
 import threading
 import traceback
+import uuid
 from multiprocessing.connection import Connection
 
 import numpy as np
@@ -47,7 +48,10 @@ _RESULT_TIMEOUT_SECONDS = 60 * 60
 _TERMINATE_JOIN_TIMEOUT_SECONDS = 10
 
 _active_lock = threading.Lock()
-_active_processes: set[mp.process.BaseProcess] = set()
+# Keyed by ProcessingJob.id so a cancellation can look up and kill the one
+# process belonging to that job, rather than every transcription worker
+# currently running in this FastAPI process.
+_active_processes: dict[uuid.UUID, mp.process.BaseProcess] = {}
 
 
 def _worker_entrypoint(
@@ -98,7 +102,7 @@ def _worker_entrypoint(
 
 
 def run_transcription_job(
-    waveform: np.ndarray, *, sample_rate: int = 16000
+    waveform: np.ndarray, *, job_id: uuid.UUID, sample_rate: int = 16000
 ) -> tuple[TranscriptionResult, str, str | None]:
     """Runs the full transcription phase for one job -- base model, with the
     configured fallback if the base pass is unusable -- in a dedicated
@@ -106,10 +110,15 @@ def run_transcription_job(
     before returning, success or failure. Blocking; call via
     `asyncio.to_thread`.
 
+    Registers the child process under `job_id` for the duration of the call
+    so `terminate_job_process(job_id)` can kill it from another thread (used
+    by job cancellation) -- this phase otherwise has no interruption points
+    of its own and can run for up to `_RESULT_TIMEOUT_SECONDS`.
+
     Returns `(result, model_used, fallback_reason)`, matching the previous
     in-process `transcribe_with_fallback` contract. Raises `RuntimeError` if
-    the child process fails, is killed, or produces no result before it
-    times out.
+    the child process fails, is killed (including by a cancellation), or
+    produces no result before it times out.
     """
     from app.core.config import get_settings
 
@@ -128,10 +137,12 @@ def run_transcription_job(
         daemon=True,
     )
     with _active_lock:
-        _active_processes.add(process)
+        _active_processes[job_id] = process
     process.start()
     child_conn.close()  # only the child's end writes to this pipe
-    logger.info("Started transcription worker process pid=%s for this job", process.pid)
+    logger.info(
+        "Started transcription worker process pid=%s for job %s", process.pid, job_id
+    )
 
     try:
         if not parent_conn.poll(_RESULT_TIMEOUT_SECONDS):
@@ -155,9 +166,40 @@ def run_transcription_job(
         return result, model_used, fallback_reason
     finally:
         parent_conn.close()
-        _terminate(process)
+        # Whoever pops the entry owns terminating it -- if `terminate_job_process`
+        # already claimed it (cancellation), don't terminate/close the same
+        # process object a second time from here.
         with _active_lock:
-            _active_processes.discard(process)
+            owned_process = _active_processes.pop(job_id, None)
+        if owned_process is not None:
+            _terminate(owned_process)
+
+
+def terminate_job_process(job_id: uuid.UUID) -> bool:
+    """Immediately kills the transcription worker process for `job_id`, if one
+    is currently running, instead of waiting for it to finish on its own.
+
+    This is the mechanism that makes cancelling a job in the "processing"
+    stage actually stop work: `run_transcription_job` has no interruption
+    points inside the base/fallback transcription calls themselves, so
+    without this, a cancelled job's worker keeps running -- and holding
+    model memory -- until it completes or times out (up to
+    `_RESULT_TIMEOUT_SECONDS`).
+
+    Returns `True` if a process was found and terminated, `False` if this
+    job had none running (e.g. it was cancelled before reaching the
+    transcription stage). Safe to call concurrently with
+    `run_transcription_job`'s own cleanup -- see the `finally` block there.
+    """
+    with _active_lock:
+        process = _active_processes.pop(job_id, None)
+    if process is None:
+        return False
+    logger.info(
+        "Cancelling job %s: terminating transcription worker pid=%s", job_id, process.pid
+    )
+    _terminate(process)
+    return True
 
 
 def terminate_active_processes() -> None:
@@ -171,12 +213,14 @@ def terminate_active_processes() -> None:
     transcript).
     """
     with _active_lock:
-        stragglers = list(_active_processes)
-    for process in stragglers:
-        logger.warning("Reaping stray transcription worker process pid=%s", process.pid)
+        stragglers = list(_active_processes.items())
+    for job_id, process in stragglers:
+        logger.warning(
+            "Reaping stray transcription worker pid=%s for job %s", process.pid, job_id
+        )
         _terminate(process)
         with _active_lock:
-            _active_processes.discard(process)
+            _active_processes.pop(job_id, None)
 
 
 def _terminate(process: mp.process.BaseProcess) -> None:

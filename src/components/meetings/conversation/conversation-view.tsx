@@ -8,12 +8,17 @@ import { TranscriptSkeleton } from "@/components/meetings/transcript/transcript-
 import { ConversationTurn } from "@/components/meetings/conversation/conversation-turn";
 import { groupIntoTurns } from "@/components/meetings/conversation/group-into-turns";
 import { cn } from "@/lib/utils";
+import { findActiveTimestampId } from "@/features/media-player/active-item";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
 
 type ConversationViewProps = React.ComponentProps<"div"> & {
   blocks?: TranscriptBlockData[];
   isLoading?: boolean;
   onTimestampClick?: (seconds: number) => void;
+  /** Current playback position, while playing — highlights the turn at or
+   * before this time. Omit (or leave undefined while paused) to show no
+   * highlight. */
+  activeTimeSeconds?: number;
   emptyTitle?: string;
   emptyDescription?: string;
   skeletonCount?: number;
@@ -32,12 +37,21 @@ function ConversationView({
   blocks = [],
   isLoading = false,
   onTimestampClick,
+  activeTimeSeconds,
   emptyTitle = "No transcript yet",
   emptyDescription = "Once this meeting is transcribed, the conversation will appear here.",
   skeletonCount = 6,
   ...props
 }: ConversationViewProps) {
   const turns = React.useMemo(() => groupIntoTurns(blocks), [blocks]);
+
+  const activeTurnId = React.useMemo(
+    () =>
+      activeTimeSeconds === undefined
+        ? undefined
+        : findActiveTimestampId(turns, activeTimeSeconds),
+    [turns, activeTimeSeconds],
+  );
 
   return (
     <div
@@ -70,7 +84,11 @@ function ConversationView({
         >
           {turns.map((turn) => (
             <div key={turn.id} role="listitem">
-              <ConversationTurn turn={turn} onTimestampClick={onTimestampClick} />
+              <ConversationTurn
+                turn={turn}
+                onTimestampClick={onTimestampClick}
+                isActive={turn.id === activeTurnId}
+              />
             </div>
           ))}
         </div>

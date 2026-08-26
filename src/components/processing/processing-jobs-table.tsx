@@ -19,7 +19,7 @@ import { formatDateTime } from "@/components/meetings/format";
 import { cn } from "@/lib/utils";
 import type { ProcessingStage } from "@/components/processing/types";
 import type { ProcessingJob } from "@/features/processing/mappers";
-import { isTerminalStatus } from "@/features/processing/mappers";
+import { isRetryableStatus, isTerminalStatus } from "@/features/processing/mappers";
 
 type ProcessingJobsTableProps = React.ComponentProps<"div"> & {
   jobs: ProcessingJob[];
@@ -28,6 +28,9 @@ type ProcessingJobsTableProps = React.ComponentProps<"div"> & {
   meetingTitles: Map<string, string>;
   /** Current wall-clock time, supplied by the caller so every row's elapsed time ticks in sync. */
   now: number;
+  /** IANA zone the "Created" column renders in (e.g. the user's timezone
+   * preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   onRetry?: (job: ProcessingJob) => void;
   isRetrying?: (job: ProcessingJob) => boolean;
   onCancel?: (job: ProcessingJob) => void;
@@ -75,6 +78,7 @@ function ProcessingJobsTable({
   isLoading = false,
   meetingTitles,
   now,
+  timeZone,
   onRetry,
   isRetrying,
   onCancel,
@@ -152,7 +156,7 @@ function ProcessingJobsTable({
                   {formatElapsed(elapsedSeconds(job, now))}
                 </TableCell>
                 <TableCell className="w-px whitespace-nowrap text-muted-foreground">
-                  {formatDateTime(job.createdAt)}
+                  {formatDateTime(job.createdAt, timeZone)}
                 </TableCell>
                 <TableCell className="w-px whitespace-nowrap pr-4">
                   <div className="flex items-center justify-end gap-2">
@@ -160,7 +164,7 @@ function ProcessingJobsTable({
                       variant="outline"
                       size="sm"
                       onClick={() => onRetry?.(job)}
-                      disabled={job.status !== "failed" || isRetrying?.(job)}
+                      disabled={!isRetryableStatus(job.status) || isRetrying?.(job)}
                     >
                       <RotateCw data-icon="inline-start" />
                       Retry

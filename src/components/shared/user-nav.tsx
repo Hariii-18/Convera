@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronsUpDown, LogOut, Settings, User } from "lucide-react";
+import { ChevronsUpDown, LogOut, Settings, User as UserIcon } from "lucide-react";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,7 @@ export function UserNav() {
       >
         <Avatar size="sm">
           <AvatarFallback>
-            {user ? initialsFor(user.full_name) : <User className="size-3.5" />}
+            {user ? initialsFor(user.full_name) : <UserIcon className="size-3.5" />}
           </AvatarFallback>
         </Avatar>
         <ChevronsUpDown className="hidden size-3.5 text-muted-foreground sm:block" />
@@ -55,10 +55,6 @@ export function UserNav() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuItem render={<Link href="/profile" />}>
-            <User />
-            Profile
-          </DropdownMenuItem>
           <DropdownMenuItem render={<Link href="/settings" />}>
             <Settings />
             Settings

@@ -36,7 +36,7 @@ export const processingApi = {
     return data;
   },
 
-  async remove(id: string): Promise<void> {
+  async cancel(id: string): Promise<void> {
     await apiClient.delete(`/process/${id}`);
   },
 };

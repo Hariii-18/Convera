@@ -9,7 +9,8 @@ export type ProcessingJobStatus =
   | "preparing"
   | "processing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type ProcessingJobResponse = {
   id: string;

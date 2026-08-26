@@ -1,4 +1,8 @@
-import type { UploadResponse, UploadStatus } from "@/features/uploads/types";
+import type {
+  UploadPlaybackResponse,
+  UploadResponse,
+  UploadStatus,
+} from "@/features/uploads/types";
 
 export type Upload = {
   id: string;
@@ -23,5 +27,19 @@ export function toUpload(response: UploadResponse): Upload {
     status: response.status,
     createdAt: response.created_at,
     updatedAt: response.updated_at,
+  };
+}
+
+export type UploadPlayback = {
+  url: string;
+  mimeType: string;
+  expiresIn: number;
+};
+
+export function toUploadPlayback(response: UploadPlaybackResponse): UploadPlayback {
+  return {
+    url: response.url,
+    mimeType: response.mime_type,
+    expiresIn: response.expires_in,
   };
 }

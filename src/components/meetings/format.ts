@@ -14,12 +14,14 @@ export function formatDuration(seconds?: number | null) {
   return `${Math.max(0, Math.floor(seconds))}s`;
 }
 
-/** "Jul 3, 2026" */
-export function formatDate(value: string | Date) {
+/** "Jul 3, 2026". `timeZone` renders in that IANA zone (e.g. the user's
+ * timezone preference) instead of the browser's local zone. */
+export function formatDate(value: string | Date, timeZone?: string) {
   return toDate(value).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone,
   });
 }
 
@@ -35,14 +37,49 @@ export function formatRelativeTime(value: string | Date) {
   return formatDate(date);
 }
 
-/** Full, unambiguous timestamp for tooltips/titles. */
-export function formatDateTime(value: string | Date) {
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Formats a due-date string (free text — not guaranteed to be
+ * ISO-parseable, see `SummaryActionItemRead.due_date`) for display.
+ *
+ * A bare `YYYY-MM-DD` value names a calendar day, not an instant — parsing
+ * it as UTC-midnight and then rendering in `timeZone` would shift it to the
+ * previous day for any zone behind UTC, which is wrong for a date nobody
+ * meant as a timestamp. Those render from their literal year/month/day,
+ * unaffected by `timeZone`. Anything else (a full timestamp, or free text
+ * the AI/user typed that happens to include a time) is treated as a real
+ * instant and rendered in `timeZone`. Unparseable text is returned as-is
+ * rather than "Invalid Date".
+ */
+export function formatDueDate(dueDate: string | Date, timeZone?: string): string {
+  if (typeof dueDate === "string") {
+    const dateOnlyMatch = dueDate.match(DATE_ONLY_PATTERN);
+    if (dateOnlyMatch) {
+      const [year, month, day] = dueDate.split("-").map(Number);
+      return new Date(year!, month! - 1, day!).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    }
+  }
+
+  const parsed = toDate(dueDate);
+  if (Number.isNaN(parsed.getTime())) return dueDate as string;
+  return formatDate(parsed, timeZone);
+}
+
+/** Full, unambiguous timestamp for tooltips/titles. `timeZone` renders in
+ * that IANA zone instead of the browser's local zone. */
+export function formatDateTime(value: string | Date, timeZone?: string) {
   return toDate(value).toLocaleString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
     hour: "numeric",
     minute: "2-digit",
+    timeZone,
   });
 }
 

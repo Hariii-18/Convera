@@ -22,6 +22,7 @@ import type {
   OpenQuestionData,
   RiskData,
 } from "@/components/meetings/summary/types";
+import type { SummaryExportFormat } from "@/features/summaries/types";
 
 type SummaryViewerProps = React.ComponentProps<"div"> & {
   executiveSummary?: string;
@@ -33,6 +34,9 @@ type SummaryViewerProps = React.ComponentProps<"div"> & {
   nextSteps?: NextStepData[];
   /** Renders every section's skeleton state. */
   loading?: boolean;
+  /** IANA zone action item due dates render in (e.g. the user's timezone
+   * preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   onToggleActionItem?: (id: string) => void;
   /** Persists a text/owner/due date/status edit made through the action
    * item edit dialog. Omit to hide the edit affordance. */
@@ -40,8 +44,11 @@ type SummaryViewerProps = React.ComponentProps<"div"> & {
   /** Id of the action item currently being saved, if any. */
   pendingActionItemId?: string | null;
   onCopy?: () => void;
-  /** Presentational placeholder — the caller owns what exporting actually does. */
-  onExport?: () => void;
+  /** Renders the currently saved summary to a format and saves it to disk.
+   * Omit to disable the Export control entirely. */
+  onExport?: (format: SummaryExportFormat) => void;
+  /** Shows a spinner on the Export control while a download is in flight. */
+  exporting?: boolean;
   /** Presentational placeholder — the caller owns what regenerating actually does. */
   onRegenerate?: () => void;
 };
@@ -62,11 +69,13 @@ function SummaryViewer({
   openQuestions,
   nextSteps,
   loading = false,
+  timeZone,
   onToggleActionItem,
   onSaveActionItem,
   pendingActionItemId,
   onCopy,
   onExport,
+  exporting = false,
   onRegenerate,
   ...props
 }: SummaryViewerProps) {
@@ -105,6 +114,7 @@ function SummaryViewer({
         wordCount={wordCount > 0 ? wordCount : undefined}
         onCopy={onCopy}
         onExport={onExport}
+        exporting={exporting}
         onRegenerate={onRegenerate}
       />
 
@@ -114,6 +124,7 @@ function SummaryViewer({
       <ActionItems
         items={actionItems}
         loading={loading}
+        timeZone={timeZone}
         onToggleActionItem={onToggleActionItem}
         onSaveActionItem={onSaveActionItem}
         pendingItemId={pendingActionItemId}

@@ -180,12 +180,17 @@ export default function DashboardPage() {
         });
       }
       if (job.completedAt) {
-        const failed = job.status === "failed";
+        // Cancelled jobs also carry a `completedAt` (see `mark_job_cancelled`)
+        // but are neither a success nor a failure — bucket them with
+        // "processing-failed" (closest existing activity type/icon) rather
+        // than mislabeling a user-initiated cancellation as "Finished".
+        const completed = job.status === "completed";
+        const cancelled = job.status === "cancelled";
         items.push({
-          id: `${job.id}-${failed ? "failed" : "completed"}`,
-          type: failed ? "processing-failed" : "processing-completed",
+          id: `${job.id}-${completed ? "completed" : cancelled ? "cancelled" : "failed"}`,
+          type: completed ? "processing-completed" : "processing-failed",
           timestamp: job.completedAt,
-          description: `${failed ? "Failed" : "Finished"} processing "${title}"`,
+          description: `${completed ? "Finished" : cancelled ? "Cancelled" : "Failed"} processing "${title}"`,
         });
       }
     }

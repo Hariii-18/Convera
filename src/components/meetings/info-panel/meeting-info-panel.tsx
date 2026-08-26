@@ -1,13 +1,14 @@
 import * as React from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { AIInsightsPlaceholder } from "@/components/meetings/info-panel/ai-insights-placeholder";
+import { AIInsightsCard } from "@/components/meetings/info-panel/ai-insights-card";
 import { MeetingInfoPanelSkeleton } from "@/components/meetings/info-panel/meeting-info-panel-skeleton";
 import { MeetingTags } from "@/components/meetings/info-panel/meeting-tags";
 import { ParticipantsCard } from "@/components/meetings/info-panel/participants-card";
 import { ProcessingInfo } from "@/components/meetings/info-panel/processing-info";
 import { RecordingInfo } from "@/components/meetings/info-panel/recording-info";
 import type {
+  MeetingInsightsData,
   MeetingTag,
   Participant,
   ProcessingInfoData,
@@ -20,6 +21,9 @@ type MeetingInfoPanelProps = React.ComponentProps<"div"> & {
   tags?: MeetingTag[];
   recording?: RecordingInfoData;
   processing?: ProcessingInfoData;
+  insights?: MeetingInsightsData;
+  insightsLoading?: boolean;
+  insightsError?: boolean;
   /** Renders the whole panel's skeleton state in place of every section. */
   loading?: boolean;
 };
@@ -36,6 +40,9 @@ function MeetingInfoPanel({
   tags,
   recording,
   processing,
+  insights,
+  insightsLoading = false,
+  insightsError = false,
   loading = false,
   ...props
 }: MeetingInfoPanelProps) {
@@ -67,7 +74,11 @@ function MeetingInfoPanel({
 
           <RecordingInfo recording={recording} />
           <ProcessingInfo data={processing} />
-          <AIInsightsPlaceholder />
+          <AIInsightsCard
+            data={insights}
+            loading={insightsLoading}
+            error={insightsError}
+          />
         </>
       )}
     </div>

@@ -22,3 +22,11 @@ class UploadRead(BaseModel):
     status: UploadStatus
     created_at: datetime
     updated_at: datetime
+
+
+class UploadPlaybackRead(BaseModel):
+    """A short-lived, direct-to-storage URL for playing back a recording."""
+
+    url: str
+    mime_type: str
+    expires_in: int

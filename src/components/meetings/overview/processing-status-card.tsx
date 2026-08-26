@@ -9,6 +9,7 @@ import { ProcessingProgress } from "@/components/processing/processing-progress"
 import { ProcessingStatus } from "@/components/processing/processing-status";
 import { formatElapsed } from "@/components/processing/format";
 import { cn } from "@/lib/utils";
+import { isRetryableStatus } from "@/features/processing/mappers";
 import type { ProcessingJob } from "@/features/processing/mappers";
 
 type ProcessingStatusCardProps = React.ComponentProps<"div"> & {
@@ -72,7 +73,7 @@ function ProcessingStatusCard({
             {job.status === "failed" && job.errorMessage && (
               <p className="text-xs text-destructive">{job.errorMessage}</p>
             )}
-            {job.status === "failed" && onRetry && (
+            {isRetryableStatus(job.status) && onRetry && (
               <Button
                 variant="outline"
                 size="sm"

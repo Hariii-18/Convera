@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/ui/status-badge";
-import { formatDate } from "@/components/meetings/format";
+import { formatDueDate } from "@/components/meetings/format";
 import { actionItemStatusConfig } from "@/components/meetings/summary/action-item-status";
 import {
   EditActionItemDialog,
@@ -20,6 +20,9 @@ import type { ActionItemData } from "@/components/meetings/summary/types";
 type ActionItemsProps = React.ComponentProps<"div"> & {
   items?: ActionItemData[];
   loading?: boolean;
+  /** IANA zone due dates render in (e.g. the user's timezone preference).
+   * Defaults to the browser's local zone. */
+  timeZone?: string;
   /** Controlled — the caller owns whether toggling changes `status`. */
   onToggleActionItem?: (id: string) => void;
   /** Controlled — the caller owns persisting text/owner/due date/status
@@ -43,6 +46,7 @@ function ActionItems({
   className,
   items = [],
   loading = false,
+  timeZone,
   onToggleActionItem,
   onSaveActionItem,
   pendingItemId = null,
@@ -132,7 +136,7 @@ function ActionItems({
                               aria-hidden="true"
                               className="size-3.5"
                             />
-                            {formatDate(item.dueDate)}
+                            {formatDueDate(item.dueDate, timeZone)}
                           </span>
                         )}
                         {isPending && <span>Saving…</span>}

@@ -9,6 +9,7 @@ import { TranscriptBlock } from "@/components/meetings/transcript/transcript-blo
 import { TranscriptToolbar } from "@/components/meetings/transcript/transcript-toolbar";
 import { TranscriptSkeleton } from "@/components/meetings/transcript/transcript-skeleton";
 import { countWords } from "@/components/meetings/format";
+import { findActiveTimestampId } from "@/features/media-player/active-item";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
 import type { TranslationLanguage } from "@/features/transcripts/types";
 
@@ -28,6 +29,10 @@ type TranscriptViewerProps = React.ComponentProps<"div"> & {
   saving?: boolean;
   onTimestampClick?: (seconds: number) => void;
   onCopy?: () => void;
+  /** Current playback position, while playing — highlights the block at or
+   * before this time. Omit (or leave undefined while paused) to show no
+   * highlight. */
+  activeTimeSeconds?: number;
   emptyTitle?: string;
   emptyDescription?: string;
   skeletonCount?: number;
@@ -69,6 +74,7 @@ function TranscriptViewer({
   saving = false,
   onTimestampClick,
   onCopy,
+  activeTimeSeconds,
   emptyTitle = "No transcript yet",
   emptyDescription = "Once this meeting is transcribed, the full transcript will appear here.",
   skeletonCount = 6,
@@ -100,6 +106,14 @@ function TranscriptViewer({
   const wordCount = React.useMemo(
     () => countWords(blocks.map((block) => block.text).join(" ")),
     [blocks],
+  );
+
+  const activeBlockId = React.useMemo(
+    () =>
+      activeTimeSeconds === undefined
+        ? undefined
+        : findActiveTimestampId(blocks, activeTimeSeconds),
+    [blocks, activeTimeSeconds],
   );
 
   React.useEffect(() => {
@@ -175,6 +189,7 @@ function TranscriptViewer({
                 searchTerm={searchValue}
                 editable={editMode}
                 onTimestampClick={onTimestampClick}
+                isActive={block.id === activeBlockId}
                 onTextChange={
                   onBlockTextChange
                     ? (text) => onBlockTextChange(block.id, text)

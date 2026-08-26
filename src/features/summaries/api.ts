@@ -3,8 +3,23 @@ import axios from "axios";
 import { apiClient } from "@/lib/api-client";
 import type {
   SummaryActionItemUpdateRequest,
+  SummaryExportFormat,
   SummaryResponse,
 } from "@/features/summaries/types";
+
+const FILENAME_PATTERN = /filename="?([^";]+)"?/i;
+
+/** Recovers the filename the backend chose (`Content-Disposition`) so the
+ * browser save dialog doesn't fall back to a generic name. Mirrors
+ * `meetingNotesApi`'s helper of the same name.
+ */
+function filenameFromContentDisposition(
+  contentDisposition: string | undefined,
+  fallback: string,
+): string {
+  const match = contentDisposition?.match(FILENAME_PATTERN);
+  return match?.[1] ?? fallback;
+}
 
 export const summariesApi = {
   /** Returns `null` when the meeting has no summary yet (404) rather than throwing. */
@@ -46,5 +61,24 @@ export const summariesApi = {
       { params: { meeting_id: meetingId } },
     );
     return data;
+  },
+
+  /** Downloads the current saved Summary tab content rendered to `format`.
+   * Returns the file as a `Blob` plus the filename the backend generated,
+   * so the caller can trigger a browser save without hardcoding a name.
+   */
+  async downloadExport(
+    meetingId: string,
+    format: SummaryExportFormat,
+  ): Promise<{ blob: Blob; filename: string }> {
+    const response = await apiClient.get(`/summaries/${meetingId}/export`, {
+      params: { format },
+      responseType: "blob",
+    });
+    const filename = filenameFromContentDisposition(
+      response.headers["content-disposition"] as string | undefined,
+      `converra-summary.${format}`,
+    );
+    return { blob: response.data as Blob, filename };
   },
 };

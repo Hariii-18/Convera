@@ -32,6 +32,8 @@ function initials(name: string) {
 type ConversationTurnProps = React.ComponentProps<"div"> & {
   turn: ConversationTurnData;
   onTimestampClick?: (seconds: number) => void;
+  /** Highlights this turn as the one currently playing. */
+  isActive?: boolean;
 };
 
 /**
@@ -44,6 +46,7 @@ function ConversationTurn({
   className,
   turn,
   onTimestampClick,
+  isActive = false,
   ...props
 }: ConversationTurnProps) {
   const speakerName = turn.speaker?.name;
@@ -51,7 +54,11 @@ function ConversationTurn({
   return (
     <div
       data-slot="conversation-turn"
-      className={cn("flex gap-3 px-4 py-3", className)}
+      className={cn(
+        "flex gap-3 px-4 py-3 transition-colors",
+        isActive && "bg-primary/5",
+        className,
+      )}
       {...props}
     >
       <Avatar size="sm" className="mt-0.5">

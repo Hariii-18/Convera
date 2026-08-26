@@ -13,6 +13,7 @@ touches this module.
 
 import asyncio
 import logging
+import uuid
 
 import numpy as np
 
@@ -23,6 +24,7 @@ from app.services.transcription.base import TranscriptionResult
 from app.services.transcription.subprocess_runner import (
     run_transcription_job,
     terminate_active_processes,
+    terminate_job_process,
 )
 
 logger = logging.getLogger("converra")
@@ -38,7 +40,9 @@ async def extract_audio_track(file_bytes: bytes) -> tuple[np.ndarray, float]:
     return await asyncio.to_thread(extract_audio, file_bytes)
 
 
-async def transcribe_with_fallback(waveform: np.ndarray) -> tuple[TranscriptionResult, str, str | None]:
+async def transcribe_with_fallback(
+    waveform: np.ndarray, job_id: uuid.UUID
+) -> tuple[TranscriptionResult, str, str | None]:
     """Transcribes with the configured base model, and -- only if that
     produced unusable output (see `is_unusable_transcription`: empty, or
     garbage/hallucinated -- dominated by a repeated character, mostly
@@ -47,14 +51,28 @@ async def transcribe_with_fallback(waveform: np.ndarray) -> tuple[TranscriptionR
     by default).
 
     Both attempts run inside one dedicated child process (see
-    `subprocess_runner.run_transcription_job`), which is terminated before
-    this call returns -- success, fallback, or failure -- so the model(s)
-    it loaded never linger in this (FastAPI) process.
+    `subprocess_runner.run_transcription_job`), registered under `job_id` so
+    `cancel_transcription_job` can kill it if the job is cancelled while this
+    is running. The process is terminated before this call returns --
+    success, fallback, failure, or cancellation -- so the model(s) it loaded
+    never linger in this (FastAPI) process.
 
     Returns `(result, model_used, fallback_reason)`. `fallback_reason` is
     `None` when the base pass was already usable.
     """
-    return await asyncio.to_thread(run_transcription_job, waveform)
+    return await asyncio.to_thread(run_transcription_job, waveform, job_id=job_id)
+
+
+def cancel_transcription_job(job_id: uuid.UUID) -> bool:
+    """Immediately kills the transcription worker process for `job_id`, if
+    one is currently running. Used by job cancellation: transcription can
+    block for up to an hour with no interruption points inside it (see
+    `subprocess_runner`), so this is the only way a cancel during that phase
+    takes effect promptly instead of at the next checkpoint. Returns `False`
+    (no-op) if this job has no worker running, e.g. it was still queued or
+    preparing.
+    """
+    return terminate_job_process(job_id)
 
 
 async def release_transcription_resources() -> None:

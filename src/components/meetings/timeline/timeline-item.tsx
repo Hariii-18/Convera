@@ -32,6 +32,8 @@ type TimelineItemProps = React.ComponentProps<"li"> & {
   /** Case-insensitive term to highlight within the title/description. UI only. */
   searchTerm?: string;
   onItemClick?: (event: TimelineEventData) => void;
+  /** Highlights this event as the one currently playing. */
+  isActive?: boolean;
 };
 
 /**
@@ -45,6 +47,7 @@ function TimelineItem({
   isLast = false,
   searchTerm,
   onItemClick,
+  isActive = false,
   ...props
 }: TimelineItemProps) {
   const clickable = Boolean(onItemClick);
@@ -64,12 +67,17 @@ function TimelineItem({
           type="button"
           onClick={() => onItemClick?.(event)}
           aria-label={label}
-          className="min-w-0 flex-1 rounded-lg py-3 text-left transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
+          className={cn(
+            "min-w-0 flex-1 rounded-lg py-3 text-left transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50",
+            isActive && "bg-primary/5",
+          )}
         >
           <TimelineItemContent event={event} searchTerm={searchTerm} />
         </button>
       ) : (
-        <div className="min-w-0 flex-1 py-3">
+        <div
+          className={cn("min-w-0 flex-1 py-3", isActive && "rounded-lg bg-primary/5")}
+        >
           <TimelineItemContent event={event} searchTerm={searchTerm} />
         </div>
       )}

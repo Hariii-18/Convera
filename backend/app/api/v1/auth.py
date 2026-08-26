@@ -5,10 +5,23 @@ from app.api.deps import get_current_user
 from app.core.config import get_settings
 from app.core.exceptions import AppError
 from app.core.security import create_access_token
-from app.crud.user import authenticate_user, create_user, get_user_by_email
+from app.crud.user import (
+    authenticate_user,
+    change_password,
+    create_user,
+    get_user_by_email,
+    update_user,
+)
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import TokenResponse, UserCreate, UserLogin, UserRead
+from app.schemas.user import (
+    PasswordChangeRequest,
+    TokenResponse,
+    UserCreate,
+    UserLogin,
+    UserRead,
+    UserUpdate,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
@@ -44,3 +57,34 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)) -> TokenRespons
 @router.get("/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> UserRead:
     return UserRead.model_validate(current_user)
+
+
+@router.patch("/me", response_model=UserRead)
+def update_current_user(
+    user_in: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> UserRead:
+    user = update_user(db, current_user, user_in)
+    return UserRead.model_validate(user)
+
+
+@router.post("/me/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_current_user_password(
+    password_in: PasswordChangeRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> None:
+    """Changes the signed-in user's password. Requires the current password
+    (rejected otherwise) and never echoes either password back. The existing
+    access token stays valid -- this only rotates the stored hash, not the
+    JWT signing secret or any session state.
+    """
+    ok = change_password(
+        db,
+        current_user,
+        current_password=password_in.current_password,
+        new_password=password_in.new_password,
+    )
+    if not ok:
+        raise AppError("Current password is incorrect", status.HTTP_401_UNAUTHORIZED)

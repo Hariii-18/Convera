@@ -57,7 +57,8 @@ class PdfExporter:
             story.append(Paragraph(meta_line, meta_style))
         else:
             story.append(Spacer(1, 6))
-        story.append(Paragraph(escape_xml(document.disclaimer), disclaimer_style))
+        if document.disclaimer:
+            story.append(Paragraph(escape_xml(document.disclaimer), disclaimer_style))
 
         for section in document.sections:
             story.append(Paragraph(escape_xml(section.heading), heading_style))

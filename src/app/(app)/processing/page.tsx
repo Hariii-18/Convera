@@ -13,6 +13,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { ProcessingJobsTable } from "@/components/processing/processing-jobs-table";
 import { CancelProcessingDialog } from "@/components/processing/cancel-processing-dialog";
 import { extractErrorMessage } from "@/features/auth/error";
+import { useUserTimezone } from "@/features/auth/hooks/use-user-timezone";
 import { useGuestSession } from "@/features/guest/guest-provider";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
@@ -35,6 +36,7 @@ function useNow() {
 export default function ProcessingPage() {
   const router = useRouter();
   const { isGuest, isReady } = useGuestSession();
+  const timeZone = useUserTimezone();
   const now = useNow();
 
   const {
@@ -126,6 +128,7 @@ export default function ProcessingPage() {
               isLoading={isLoading}
               meetingTitles={meetingTitles}
               now={now}
+              timeZone={timeZone}
               onRetry={(job) => handleRetry(job.id)}
               isRetrying={(job) =>
                 retryMutation.isPending && retryMutation.variables === job.id

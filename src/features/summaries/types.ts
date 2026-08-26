@@ -51,3 +51,7 @@ export type SummaryResponse = {
   created_at: string;
   updated_at: string;
 };
+
+/** Mirrors `MeetingNotesExportFormat`/`ConversationExportFormat` — same
+ * three renderers, applied to just the Summary tab's content. */
+export type SummaryExportFormat = "pdf" | "docx" | "pptx";

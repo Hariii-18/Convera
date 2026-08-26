@@ -17,6 +17,7 @@ import type {
 import { MeetingNotesViewer } from "@/components/meetings/notes/meeting-notes-viewer";
 import { SpeakersSection } from "@/components/meetings/notes/speakers-section";
 import { MeetingOverview } from "@/components/meetings/overview/meeting-overview";
+import { MeetingMediaPlayer } from "@/components/meetings/player/meeting-media-player";
 import { SummaryViewer } from "@/components/meetings/summary/summary-viewer";
 import { TimelineViewer } from "@/components/meetings/timeline/timeline-viewer";
 import { TranscriptViewer } from "@/components/meetings/transcript/transcript-viewer";
@@ -39,7 +40,10 @@ import type {
   TimelineEventPreview,
 } from "@/components/meetings/overview/types";
 import { formatTimestamp } from "@/components/meetings/format";
+import { useMediaPlayer } from "@/features/media-player/use-media-player";
+import type { MediaPlayerStatus } from "@/features/media-player/use-media-player";
 import { extractErrorMessage } from "@/features/auth/error";
+import { useUserTimezone } from "@/features/auth/hooks/use-user-timezone";
 import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
@@ -47,6 +51,8 @@ import { useProcessingJob } from "@/features/processing/hooks/use-processing-job
 import { useRetryProcessing } from "@/features/processing/hooks/use-retry-processing";
 import { isTerminalStatus } from "@/features/processing/mappers";
 import { useUploads } from "@/features/uploads/hooks/use-uploads";
+import { useUploadPlayback } from "@/features/uploads/hooks/use-upload-playback";
+import type { Upload } from "@/features/uploads/mappers";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
@@ -61,8 +67,10 @@ import type {
 } from "@/features/transcripts/types";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useTimeline } from "@/features/timeline/hooks/use-timeline";
+import { useMeetingInsights } from "@/features/insights/hooks/use-meeting-insights";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { useUpdateActionItem } from "@/features/summaries/hooks/use-update-action-item";
+import { useExportSummary } from "@/features/summaries/hooks/use-export-summary";
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
 import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
 import { useExportMeetingNotes } from "@/features/meeting-notes/hooks/use-export-meeting-notes";
@@ -121,10 +129,30 @@ function deriveRecordingType(mimeType: string | undefined): "audio" | "video" | 
   return mimeType.startsWith("video/") ? "video" : "audio";
 }
 
+/**
+ * Resolution state for the media player, from the recording upload's own
+ * status plus the signed playback-URL fetch. "loading" covers both an
+ * upload that's still `uploading`/being processed and a playback URL fetch
+ * still in flight — the player shows one skeleton state either way.
+ */
+function deriveRecordingPlaybackStatus(
+  recordingUpload: Upload | undefined,
+  isPlaybackLoading: boolean,
+  isPlaybackError: boolean,
+  playbackUrl: string | undefined,
+): MediaPlayerStatus {
+  if (!recordingUpload) return "unavailable";
+  if (recordingUpload.status !== "uploaded") return "loading";
+  if (isPlaybackError) return "error";
+  if (isPlaybackLoading || !playbackUrl) return "loading";
+  return "ready";
+}
+
 export default function MeetingPage({ params }: MeetingPageProps) {
   const { id } = use(params);
   const router = useRouter();
   const ownEmail = useAuthStore((state) => state.user?.email);
+  const timeZone = useUserTimezone();
   const { isGuest, isReady, pendingAction, guard, closeDialog } =
     useGuestGate();
   const guestMeeting = useGuestMeetingsStore((state) => state.getMeeting(id));
@@ -174,8 +202,18 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     jobStatus: processingJob?.status ?? null,
   });
   const regenerateSummary = useRegenerateSummary(id);
+  const exportSummary = useExportSummary(id);
 
   const { data: timelineEvents, isLoading: isTimelineLoading } = useTimeline(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
+
+  const {
+    data: insights,
+    isLoading: isInsightsLoading,
+    isError: isInsightsError,
+  } = useMeetingInsights(id, {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
@@ -257,6 +295,25 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     (transcript?.duration != null ? Math.round(transcript.duration) : null);
 
   const recordingType = deriveRecordingType(recordingUpload?.mimeType);
+
+  const {
+    data: playback,
+    isLoading: isPlaybackLoading,
+    isError: isPlaybackError,
+  } = useUploadPlayback(recordingUpload?.id, {
+    enabled: isReady && !isGuest && recordingUpload?.status === "uploaded",
+  });
+
+  const player = useMediaPlayer({
+    mediaType: recordingType,
+    status: deriveRecordingPlaybackStatus(
+      recordingUpload,
+      isPlaybackLoading,
+      isPlaybackError,
+      playback?.url,
+    ),
+    playbackUrl: playback?.url,
+  });
 
   const overviewStatistics: MeetingStatisticsData = {
     transcriptWordCount: transcript?.wordCount,
@@ -477,7 +534,17 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             status={meeting.status}
             durationSeconds={meeting.durationSeconds}
             createdAt={meeting.createdAt}
-            onExport={() => toast("Export meeting")}
+            timeZone={timeZone}
+            onExport={() =>
+              guard("export-meeting", () =>
+                exportMeetingNotes.mutate(meetingNotesExportFormat, {
+                  onSuccess: (downloaded) =>
+                    toast.success(`${downloaded.toUpperCase()} downloaded`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                }),
+              )
+            }
             onRename={() =>
               guard("rename-meeting", () => setRenameTarget(meeting))
             }
@@ -496,10 +563,14 @@ export default function MeetingPage({ params }: MeetingPageProps) {
           <WorkspaceNavigation value={activeTab} onValueChange={setActiveTab} />
         }
         activeTab={activeTab}
+        mediaPlayer={<MeetingMediaPlayer player={player} />}
         sidePanel={
           <MeetingInfoPanel
             recording={isGuest ? undefined : infoPanelRecording}
             processing={isGuest ? undefined : infoPanelProcessing}
+            insights={isGuest ? undefined : insights}
+            insightsLoading={isGuest ? false : isInsightsLoading}
+            insightsError={isGuest ? false : isInsightsError}
           />
         }
       >
@@ -512,6 +583,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
               createdAt: meeting.createdAt,
               updatedAt: meeting.updatedAt,
             }}
+            timeZone={timeZone}
             statistics={isGuest ? undefined : overviewStatistics}
             recording={isGuest ? undefined : overviewRecording}
             summary={isGuest ? undefined : summary?.executiveSummary}
@@ -521,7 +593,20 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             processingJobLoading={isGuest ? false : isProcessingJobLoading}
             onViewFullSummary={() => setActiveTab("summary")}
             onViewTimeline={() => setActiveTab("timeline")}
-            onDownloadRecording={() => toast("Download recording")}
+            onDownloadRecording={
+              playback?.url
+                ? () => {
+                    const link = document.createElement("a");
+                    link.href = playback.url;
+                    link.download = meeting.title;
+                    link.rel = "noopener noreferrer";
+                    link.target = "_blank";
+                    document.body.appendChild(link);
+                    link.click();
+                    link.remove();
+                  }
+                : undefined
+            }
             onRetryProcessing={handleRetryProcessing}
             isRetryingProcessing={retryProcessing.isPending}
           />
@@ -568,7 +653,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                 );
               })
             }
-            onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
+            onTimestampClick={player.seek}
+            activeTimeSeconds={player.isPlaying ? player.currentTime : undefined}
             onCopy={() =>
               toast(
                 transcriptView === "normalized"
@@ -655,7 +741,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             <ConversationView
               blocks={displayedTranscriptBlocks}
               isLoading={isGuest ? false : isTranscriptLoading}
-              onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
+              onTimestampClick={player.seek}
+              activeTimeSeconds={player.isPlaying ? player.currentTime : undefined}
               emptyTitle={
                 isTranscriptError ? "Couldn't load transcript" : undefined
               }
@@ -677,6 +764,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             risks={summary?.risks}
             openQuestions={summary?.openQuestions}
             nextSteps={summary?.nextSteps}
+            timeZone={timeZone}
             loading={
               isGuest ? false : isSummaryLoading || regenerateSummary.isPending
             }
@@ -733,7 +821,17 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                 : null
             }
             onCopy={() => toast("Summary copied")}
-            onExport={() => toast("Export summary")}
+            onExport={(format) =>
+              guard("export-meeting", () =>
+                exportSummary.mutate(format, {
+                  onSuccess: (downloaded) =>
+                    toast.success(`${downloaded.toUpperCase()} downloaded`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                }),
+              )
+            }
+            exporting={exportSummary.isPending}
             onRegenerate={() =>
               guard("manage-meeting", () =>
                 regenerateSummary.mutate(undefined, {
@@ -841,7 +939,8 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             onSearchChange={setTimelineSearch}
             expanded={timelineExpanded}
             onExpandedChange={setTimelineExpanded}
-            onItemClick={(event) => toast(`Jump to "${event.title}"`)}
+            onItemClick={(event) => player.seek(event.timestampSeconds)}
+            activeTimeSeconds={player.isPlaying ? player.currentTime : undefined}
           />
         )}
 

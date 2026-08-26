@@ -1,5 +1,6 @@
 import {
   AudioLines,
+  Ban,
   Captions,
   CircleCheck,
   CircleX,
@@ -28,12 +29,14 @@ export const processingStageConfig: Record<
   finalizing: { label: "Finalizing", icon: PackageCheck },
   completed: { label: "Completed", icon: CircleCheck },
   failed: { label: "Failed", icon: CircleX },
+  cancelled: { label: "Cancelled", icon: Ban },
 };
 
 /** Coarse status derived from `stage`, for the status badge. */
 export function getProcessingStatus(stage: ProcessingStage) {
   if (stage === "completed") return "completed" as const;
   if (stage === "failed") return "failed" as const;
+  if (stage === "cancelled") return "cancelled" as const;
   if (stage === "queued") return "queued" as const;
   return "processing" as const;
 }

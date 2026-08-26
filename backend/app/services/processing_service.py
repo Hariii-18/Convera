@@ -9,10 +9,12 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
 from app.crud.meeting import get_meeting, update_meeting_status
+from app.crud.notification import create_notification
 from app.crud.processing_job import (
     create_processing_job,
     get_active_processing_job_for_upload,
     get_processing_job_by_id,
+    mark_job_cancelled,
     mark_job_completed,
     mark_job_failed,
     mark_job_started,
@@ -22,7 +24,7 @@ from app.crud.processing_job import (
 from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
 from app.crud.upload import get_upload
 from app.db.session import SessionLocal
-from app.models.processing_job import ProcessingJob
+from app.models.processing_job import ACTIVE_STATUSES, ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
 from app.services.diarization.factory import get_diarization_provider
@@ -33,6 +35,7 @@ from app.services.speaker_alignment_service import (
 )
 from app.services.transcription.base import is_unusable_transcription
 from app.workers.processor import (
+    cancel_transcription_job,
     download_upload,
     extract_audio_track,
     release_transcription_resources,
@@ -50,6 +53,44 @@ def _sync_meeting_status(
         update_meeting_status(db, meeting, meeting_status, commit=commit)
 
 
+_NOTIFICATION_COPY: dict[str, tuple[str, str]] = {
+    "completed": ("processing_completed", "Processing completed"),
+    "failed": ("processing_failed", "Processing failed"),
+    "cancelled": ("processing_cancelled", "Processing cancelled"),
+}
+
+
+def _notify_processing_outcome(
+    db: Session, job: ProcessingJob, outcome: str, *, commit: bool = True
+) -> None:
+    """Creates the in-app notification for a job's terminal outcome
+    (completed/failed/cancelled), owned by the job's user. Best-effort: a
+    missing meeting (already hard-deleted, in principle) just falls back to
+    a generic label rather than blocking the job's own status transition.
+    """
+    notif_type, title = _NOTIFICATION_COPY[outcome]
+    meeting = get_meeting(db, job.meeting_id, job.user_id)
+    meeting_title = meeting.title if meeting is not None else "Your meeting"
+
+    if outcome == "completed":
+        message = f'"{meeting_title}" finished processing and is ready to view.'
+    elif outcome == "failed":
+        message = f'"{meeting_title}" failed to process.'
+    else:
+        message = f'"{meeting_title}" processing was cancelled.'
+
+    create_notification(
+        db,
+        user_id=job.user_id,
+        type=notif_type,
+        title=title,
+        message=message,
+        meeting_id=job.meeting_id,
+        processing_job_id=job.id,
+        commit=commit,
+    )
+
+
 def _finalize_job(
     db: Session,
     job: ProcessingJob,
@@ -61,32 +102,57 @@ def _finalize_job(
     """Marks a job completed/failed and syncs its meeting's status in a
     single commit, so a crash between the two can never leave the job row
     showing one outcome while the meeting status is stuck on another.
+
+    No-ops if the job has already been cancelled: cancellation kills the
+    in-flight worker (see `cancel_processing_job`), which surfaces here as
+    an ordinary completion/failure a moment later -- without this check that
+    race would overwrite the "cancelled" status/stage with "failed" right
+    after the user cancelled it.
     """
+    if job.status == "cancelled":
+        return
     if job_status == "completed":
         mark_job_completed(db, job, commit=False)
     else:
         mark_job_failed(db, job, error_message=error_message or "", commit=False)
     _sync_meeting_status(db, job.meeting_id, job.user_id, meeting_status, commit=False)
+    _notify_processing_outcome(db, job, job_status, commit=False)
     db.commit()
     db.refresh(job)
 
 
 class _JobCancelled(Exception):
-    """Raised from a pipeline stage-reporter when the job row was deleted
-    mid-run (the user cancelled it), so `execute_processing_job` can stop
-    without treating the run as a failure.
+    """Raised from a pipeline stage-reporter when the job was cancelled
+    mid-run (row deleted, or status flipped to "cancelled"), so
+    `execute_processing_job` can stop without treating the run as a failure.
     """
+
+
+def _reload_active_job(db: Session, job_id: uuid.UUID) -> ProcessingJob | None:
+    """Re-fetches the job and returns it only if the run should continue.
+
+    Returns `None` both when the row is gone and when its status has been
+    set to "cancelled" -- the same signal `execute_processing_job` already
+    treats as "stop where you are" at every checkpoint between pipeline
+    steps, which is how a queued/preparing job's cancellation takes effect
+    (it simply never reaches the next step) and how a processing job's
+    cancellation is confirmed after its worker process has been killed.
+    """
+    job = get_processing_job_by_id(db, job_id)
+    if job is None or job.status == "cancelled":
+        return None
+    return job
 
 
 def _pipeline_stage_reporter(db: Session, job_id: uuid.UUID) -> Callable[[str, int], None]:
     """Bridges the upload-agnostic pipeline's `on_stage` callback to this
     job's `ProcessingJob` row, re-fetching it before every update so a
-    cancellation (job row deleted mid-run) stops the pipeline the same way
-    every other step in this file already does.
+    cancellation stops the pipeline the same way every other step in this
+    file already does.
     """
 
     def _on_stage(stage: str, progress: int) -> None:
-        job = get_processing_job_by_id(db, job_id)
+        job = _reload_active_job(db, job_id)
         if job is None:
             raise _JobCancelled()
         update_job_progress(db, job, status="processing", stage=stage, progress=progress)
@@ -137,11 +203,50 @@ def queue_processing_job(db: Session, *, upload: Upload, user: User) -> Processi
 
 
 def retry_processing_job(db: Session, job: ProcessingJob) -> ProcessingJob:
-    if job.status != "failed":
-        raise AppError("Only failed jobs can be retried", status.HTTP_400_BAD_REQUEST)
+    if job.status not in ("failed", "cancelled"):
+        raise AppError(
+            "Only failed or cancelled jobs can be retried", status.HTTP_400_BAD_REQUEST
+        )
 
     job = reset_job_for_retry(db, job)
     _sync_meeting_status(db, job.meeting_id, job.user_id, "processing")
+    return job
+
+
+def cancel_processing_job(db: Session, job: ProcessingJob) -> ProcessingJob:
+    """Cancels a queued/preparing/processing job in place.
+
+    Never deletes the row -- the job's history (attempts, timestamps) stays
+    intact for the UI and for `retry_processing_job`, which can resume a
+    cancelled job exactly like a failed one. Flips the job straight to the
+    terminal "cancelled" status and, if a transcription worker process is
+    currently running for it, kills that process immediately rather than
+    waiting for it to notice at its next checkpoint: transcription has no
+    interruption points of its own (see `subprocess_runner`) and can
+    otherwise keep running for up to an hour after the job row already says
+    "cancelled". A queued or preparing job has no worker yet, so cancelling
+    it is just the status flip -- `execute_processing_job` (or its
+    not-yet-run `BackgroundTasks` invocation) sees "cancelled" at its very
+    first checkpoint and never starts real work.
+
+    Meeting.status is synced to "failed" (the existing terminal-but-
+    retryable state a processing meeting already flips to on any job
+    failure) rather than a new meeting-level status, since retrying a
+    cancelled job flips it back to "processing" through the same edge a
+    failed job's retry already uses.
+    """
+    if job.status not in ACTIVE_STATUSES:
+        raise AppError(
+            "Only queued, preparing, or processing jobs can be cancelled",
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+    had_worker = job.status in ("preparing", "processing")
+    job = mark_job_cancelled(db, job)
+    _sync_meeting_status(db, job.meeting_id, job.user_id, "failed")
+    _notify_processing_outcome(db, job, "cancelled")
+    if had_worker:
+        cancel_transcription_job(job.id)
     return job
 
 
@@ -153,12 +258,15 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
 
     Invoked via FastAPI `BackgroundTasks` after the response has already been
     sent, so it opens its own DB session rather than reusing the request's.
-    Re-fetches the job before each state transition so a job deleted mid-run
-    (cancelled) simply stops instead of erroring.
+    Re-fetches the job before each state transition (see `_reload_active_job`)
+    so a cancelled job -- deleted row, or status flipped to "cancelled" --
+    simply stops instead of erroring. A job cancelled while still "queued"
+    is caught right here, before anything is marked "preparing" or any real
+    work starts.
     """
     db = SessionLocal()
     try:
-        job = get_processing_job_by_id(db, job_id)
+        job = _reload_active_job(db, job_id)
         if job is None:
             return
 
@@ -188,7 +296,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 job_id, time.perf_counter() - t0, len(file_bytes),
             )
 
-            job = get_processing_job_by_id(db, job_id)
+            job = _reload_active_job(db, job_id)
             if job is None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Extracting audio", progress=20)
@@ -201,12 +309,12 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 job_id, time.perf_counter() - t0, waveform.shape[0], _duration_seconds,
             )
 
-            job = get_processing_job_by_id(db, job_id)
+            job = _reload_active_job(db, job_id)
             if job is None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Loading model", progress=35)
 
-            job = get_processing_job_by_id(db, job_id)
+            job = _reload_active_job(db, job_id)
             if job is None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Transcribing", progress=45)
@@ -215,10 +323,14 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             # worker process spawned by `transcribe_with_fallback` itself
             # (see `subprocess_runner.run_transcription_job`), so it's timed
             # as part of this single "transcription" span rather than a
-            # separate step.
+            # separate step. That process is registered under `job.id` for
+            # the duration of the call, so a cancellation arriving while this
+            # is in flight kills it directly (see `cancel_processing_job`)
+            # instead of waiting for this checkpoint pattern to catch it --
+            # this phase has no checkpoints of its own.
             logger.info("[timing] job %s transcription start", job_id)
             t0 = time.perf_counter()
-            result, model_used, fallback_reason = await transcribe_with_fallback(waveform)
+            result, model_used, fallback_reason = await transcribe_with_fallback(waveform, job.id)
             logger.info(
                 "[timing] job %s transcription end elapsed=%.3fs model=%s fallback_reason=%s",
                 job_id, time.perf_counter() - t0, model_used, fallback_reason,
@@ -242,7 +354,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                     "(empty, garbage, or hallucinated output)."
                 )
                 logger.warning("Processing job %s low-confidence: %s", job_id, error_message)
-                job = get_processing_job_by_id(db, job_id)
+                job = _reload_active_job(db, job_id)
                 if job is not None:
                     _finalize_job(
                         db, job, job_status="failed", meeting_status="failed",
@@ -250,7 +362,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                     )
                 return
 
-            job = get_processing_job_by_id(db, job_id)
+            job = _reload_active_job(db, job_id)
             if job is None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Saving transcript", progress=90)
@@ -304,7 +416,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             job_id, time.perf_counter() - t0,
         )
 
-        job = get_processing_job_by_id(db, job_id)
+        job = _reload_active_job(db, job_id)
         if job is None:
             return
 
@@ -332,7 +444,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 "Processing job %s post-transcription pipeline failed (prior steps preserved): %s",
                 job_id, exc.message,
             )
-            job = get_processing_job_by_id(db, job_id)
+            job = _reload_active_job(db, job_id)
             if job is not None:
                 _finalize_job(
                     db, job, job_status="failed", meeting_status="failed",
@@ -341,7 +453,7 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             return
         logger.info("[timing] job %s pipeline end elapsed=%.3fs", job_id, time.perf_counter() - t0)
 
-        job = get_processing_job_by_id(db, job_id)
+        job = _reload_active_job(db, job_id)
         if job is None:
             return
 
@@ -351,9 +463,20 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
         logger.info("[timing] job %s finalization end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         logger.info("Processing job %s completed for upload %s", job.id, upload.id)
     except Exception as exc:  # noqa: BLE001 (worker failure must never crash the task loop)
-        logger.exception("Processing job %s failed", job_id, exc_info=exc)
         job = get_processing_job_by_id(db, job_id)
-        if job is not None:
-            _finalize_job(db, job, job_status="failed", meeting_status="failed", error_message=str(exc))
+        if job is not None and job.status == "cancelled":
+            # Killing the transcription worker process (`cancel_processing_job`)
+            # surfaces here as this job's `await transcribe_with_fallback(...)`
+            # raising once the pipe breaks -- expected, not a real failure.
+            # `_finalize_job` would no-op anyway, but skip it (and the noisy
+            # exception log) entirely since the job is already in its correct
+            # terminal state.
+            logger.info("Processing job %s stopped after cancellation", job_id)
+        else:
+            logger.exception("Processing job %s failed", job_id, exc_info=exc)
+            if job is not None:
+                _finalize_job(
+                    db, job, job_status="failed", meeting_status="failed", error_message=str(exc)
+                )
     finally:
         db.close()

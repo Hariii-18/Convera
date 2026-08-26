@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.schemas.meeting_notes import MeetingNotesRead
+from app.schemas.summary import SummaryRead
 
 # Exact wording required on every export/email that carries the editable
 # transcript (Meeting Notes PDF/DOCX/PPTX, Conversation PDF/DOCX, and their
@@ -69,6 +70,10 @@ class ExportDocument:
     participants_label: str | None
     sections: list[ExportSection]
     disclaimer: str = TRANSCRIPT_DISCLAIMER
+    # Document-type label PptxExporter prints under the brand on its title
+    # slide (PDF/DOCX carry no such label). "Meeting Notes" for the full
+    # export, "Summary" for `build_summary_export_document`.
+    kind_label: str = "Meeting Notes"
 
 
 def escape_xml(text: str) -> str:
@@ -257,4 +262,109 @@ def build_export_document(notes: MeetingNotesRead) -> ExportDocument:
         participants_label=participants_label,
         sections=sections,
         disclaimer=TRANSCRIPT_DISCLAIMER,
+    )
+
+
+def build_summary_export_document(
+    summary: SummaryRead,
+    meeting_title: str,
+    date_time_ist: str,
+    duration_seconds: int | None,
+    participants_count: int | None,
+) -> ExportDocument:
+    """Composes export content for the Summary tab's Export action - the same
+    seven sections `SummaryViewer` renders on screen (no Detailed Discussion,
+    no Full Transcript), sourced exclusively from the saved `Summary` row so a
+    download always matches what's currently on screen. Mirrors
+    `build_export_document`'s "omit empty sections" rule; no disclaimer since
+    there's no editable transcript involved in a summary-only export.
+    """
+    sections: list[ExportSection] = []
+
+    if summary.executive_summary:
+        sections.append(
+            ExportSection(
+                "Executive Summary", [summary.executive_summary], kind=SECTION_SUMMARY
+            )
+        )
+
+    if summary.topics:
+        sections.append(
+            ExportSection(
+                "Discussion Topics",
+                [
+                    f"{topic.title}: {topic.description}" if topic.description else topic.title
+                    for topic in summary.topics
+                ],
+                kind=SECTION_DISCUSSION,
+                items=[
+                    {"title": topic.title, "description": topic.description}
+                    for topic in summary.topics
+                ],
+            )
+        )
+
+    if summary.decisions:
+        sections.append(
+            ExportSection(
+                "Decisions", [item.text for item in summary.decisions], kind=SECTION_DECISIONS
+            )
+        )
+
+    if summary.action_items:
+        sections.append(
+            ExportSection(
+                f"Action Items ({len(summary.action_items)})",
+                [_action_item_line(item) for item in summary.action_items],
+                kind=SECTION_ACTIONS,
+                items=[
+                    {
+                        "text": item.text,
+                        "owner": item.owner,
+                        "due_date": item.due_date,
+                        "status": item.status,
+                    }
+                    for item in summary.action_items
+                ],
+            )
+        )
+
+    if summary.risks:
+        sections.append(
+            ExportSection(
+                "Risks / Blockers", [item.text for item in summary.risks], kind=SECTION_RISKS
+            )
+        )
+
+    if summary.open_questions:
+        sections.append(
+            ExportSection(
+                "Open Questions",
+                [item.text for item in summary.open_questions],
+                kind=SECTION_QUESTIONS,
+            )
+        )
+
+    if summary.next_steps:
+        sections.append(
+            ExportSection(
+                "Next Steps", [item.text for item in summary.next_steps], kind=SECTION_NEXT_STEPS
+            )
+        )
+
+    participants_label = (
+        f"{participants_count} participant{'s' if participants_count != 1 else ''}"
+        if participants_count is not None
+        else None
+    )
+
+    return ExportDocument(
+        brand="Converra",
+        meeting_title=meeting_title,
+        date_time_ist=date_time_ist,
+        duration_label=format_duration_label(duration_seconds),
+        participants_label=participants_label,
+        sections=sections,
+        disclaimer="",
+        kind_label="Summary",
     )

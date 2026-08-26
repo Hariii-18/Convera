@@ -8,7 +8,7 @@ export function useCancelProcessing() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => processingApi.remove(id),
+    mutationFn: (id: string) => processingApi.cancel(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["processing"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard", "stats"] });

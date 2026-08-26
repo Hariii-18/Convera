@@ -15,8 +15,10 @@ from app.crud.summary import get_summary_by_meeting_id
 from app.db.session import get_db
 from app.models.meeting import Meeting
 from app.models.user import User
+from app.schemas.insights import MeetingInsightsRead
 from app.schemas.meeting import MeetingCreate, MeetingRead, MeetingUpdate
 from app.schemas.summary import TimelineEventRead, TimelineRead
+from app.services.insights_service import get_meeting_insights
 from app.services.meeting_service import delete_meeting_cascade
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -78,6 +80,23 @@ def get_timeline(
             for event in ordered_events
         ],
     )
+
+
+@router.get("/{meeting_id}/insights", response_model=MeetingInsightsRead)
+def get_insights(
+    meeting_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MeetingInsightsRead:
+    """Returns AI Insights derived from the meeting's Summary (unresolved
+    issues, decision uncertainty, risk signals, unanswered questions, and
+    follow-up gaps). Never 404s on "no summary yet" — that's an honest
+    `has_summary: false` with empty sections, not an error; only an
+    unowned or nonexistent meeting 404s. See `insights_service` for how
+    each section is derived — no new AI call is made here.
+    """
+    _get_owned_meeting(db, meeting_id, current_user)
+    return get_meeting_insights(db, meeting_id)
 
 
 @router.patch("/{meeting_id}", response_model=MeetingRead)

@@ -219,7 +219,7 @@ class PptxExporter:
         theme.add_circle(slide, _in(-1.1), _in(SLIDE_H_IN - 2.6), _in(3.4), theme.PRIMARY)
 
         theme.add_text(slide, _in(0.55), _in(0.55), _in(band_w - 1), _in(0.4), document.brand.upper(), size=15, bold=True, color=theme.WHITE)
-        theme.add_text(slide, _in(0.55), _in(0.95), _in(band_w - 1), _in(0.3), "Meeting Notes", size=11, color=theme.PRIMARY_LIGHT)
+        theme.add_text(slide, _in(0.55), _in(0.95), _in(band_w - 1), _in(0.3), document.kind_label, size=11, color=theme.PRIMARY_LIGHT)
 
         right_left = band_w + 0.5
         right_width = SLIDE_W_IN - right_left - MARGIN_IN
@@ -251,11 +251,12 @@ class PptxExporter:
                 value_text = theme.truncate_to_fit(value, value_capacity)
                 theme.add_text(slide, _in(x + 0.22), _in(chip_top + 0.44), _in(chip_w - 0.4), _in(0.5), value_text, size=13.5, bold=True, color=theme.INK, line_spacing=1.1)
 
-        disclaimer_top = chip_top + 1.0 + 0.25 if chips else 5.6
-        theme.add_text(
-            slide, _in(right_left), _in(disclaimer_top), _in(right_width), _in(0.4),
-            document.disclaimer, size=8.5, italic=True, color=theme.SUBTLE, line_spacing=1.2,
-        )
+        if document.disclaimer:
+            disclaimer_top = chip_top + 1.0 + 0.25 if chips else 5.6
+            theme.add_text(
+                slide, _in(right_left), _in(disclaimer_top), _in(right_width), _in(0.4),
+                document.disclaimer, size=8.5, italic=True, color=theme.SUBTLE, line_spacing=1.2,
+            )
 
     # -- slide 2: executive summary + at-a-glance ----------------------------
 

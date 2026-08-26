@@ -37,3 +37,24 @@ export type MeetingTag = {
   id: string;
   label: string;
 };
+
+export type InsightItem = {
+  id: string;
+  text: string;
+  detail?: string;
+};
+
+/**
+ * AI Insights, derived entirely from the meeting's existing Summary (see
+ * `app.services.insights_service` on the backend) — no separate generation
+ * step, so there's no `status`/`loading` field here beyond `hasSummary`.
+ */
+export type MeetingInsightsData = {
+  /** `false` means the meeting has no Summary yet; every list below is `[]`. */
+  hasSummary: boolean;
+  unresolvedIssues: InsightItem[];
+  decisionUncertainty: InsightItem[];
+  riskSignals: InsightItem[];
+  unansweredQuestions: InsightItem[];
+  followUpGaps: InsightItem[];
+};
