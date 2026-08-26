@@ -55,3 +55,17 @@ export type SummaryResponse = {
 /** Mirrors `MeetingNotesExportFormat`/`ConversationExportFormat` — same
  * three renderers, applied to just the Summary tab's content. */
 export type SummaryExportFormat = "pdf" | "docx" | "pptx";
+
+/** Body for `POST /summaries/{meeting_id}/email`. `send_to_me` and
+ * `recipients` are merged and deduplicated server-side into the final send
+ * list — see `backend/app/services/summary_email_service.py`. */
+export type SummaryEmailRequest = {
+  format: SummaryExportFormat;
+  send_to_me: boolean;
+  recipients: string[];
+};
+
+export type SummaryEmailResponse = {
+  sent: boolean;
+  recipients: string[];
+};

@@ -91,6 +91,7 @@ function MeetingOverview({
         <ProcessingStatusCard
           job={processingJob}
           loading={loading || processingJobLoading}
+          meetingStatus={metadata?.status}
           onRetry={onRetryProcessing}
           isRetrying={isRetryingProcessing}
         />

@@ -37,10 +37,12 @@ type ConversationTurnProps = React.ComponentProps<"div"> & {
 };
 
 /**
- * One speaker turn: avatar, name, and a jump-to-timestamp control sit above
- * the text — never inline with it, so the conversation itself reads as
- * plain speech. Multiple underlying segments in the same turn render as
- * separate paragraphs, each keeping its own exact text.
+ * One speaker turn: avatar and a jump-to-timestamp control sit above the
+ * text as secondary/navigation chrome. The speaker name itself is repeated
+ * as a "Speaker: " prefix on every underlying segment (not just once per
+ * turn), so the visible conversation format never depends on the timestamp
+ * or the avatar to tell who's speaking on a given line — each segment keeps
+ * its own exact text and order.
  */
 function ConversationTurn({
   className,
@@ -75,9 +77,6 @@ function ConversationTurn({
 
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center gap-2">
-          {speakerName && (
-            <p className="text-sm font-medium text-foreground">{speakerName}</p>
-          )}
           <Timestamp
             seconds={turn.timestampSeconds}
             onClick={
@@ -92,6 +91,9 @@ function ConversationTurn({
               key={block.id}
               className="text-sm leading-relaxed whitespace-pre-wrap text-foreground"
             >
+              {speakerName && (
+                <span className="font-medium text-foreground">{speakerName}: </span>
+              )}
               {block.text}
             </p>
           ))}

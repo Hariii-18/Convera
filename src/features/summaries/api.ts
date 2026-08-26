@@ -3,6 +3,8 @@ import axios from "axios";
 import { apiClient } from "@/lib/api-client";
 import type {
   SummaryActionItemUpdateRequest,
+  SummaryEmailRequest,
+  SummaryEmailResponse,
   SummaryExportFormat,
   SummaryResponse,
 } from "@/features/summaries/types";
@@ -80,5 +82,27 @@ export const summariesApi = {
       `converra-summary.${format}`,
     );
     return { blob: response.data as Blob, filename };
+  },
+
+  /** Renders the current saved Summary tab content to `format` and emails
+   * it to every resolved recipient in one request: the authenticated user
+   * (when `sendToMe`) plus `recipients`. Never regenerates the summary
+   * first and never sends Meeting Notes — the backend renders straight
+   * from the persisted `Summary` row (see `export_summary`).
+   */
+  async sendEmail(
+    meetingId: string,
+    payload: { format: SummaryExportFormat; sendToMe: boolean; recipients: string[] },
+  ): Promise<SummaryEmailResponse> {
+    const body: SummaryEmailRequest = {
+      format: payload.format,
+      send_to_me: payload.sendToMe,
+      recipients: payload.recipients,
+    };
+    const { data } = await apiClient.post<SummaryEmailResponse>(
+      `/summaries/${meetingId}/email`,
+      body,
+    );
+    return data;
   },
 };

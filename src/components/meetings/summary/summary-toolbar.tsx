@@ -10,6 +10,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  MeetingNotesEmailDialog,
+  type MeetingNotesEmailSendPayload,
+} from "@/components/meetings/notes/meeting-notes-email-dialog";
 import { formatReadingTime } from "@/components/meetings/summary/format";
 import { cn } from "@/lib/utils";
 import type { SummaryExportFormat } from "@/features/summaries/types";
@@ -33,6 +44,18 @@ type SummaryToolbarProps = React.ComponentProps<"div"> & {
   exporting?: boolean;
   /** Presentational placeholder — the caller owns what regenerating actually does. */
   onRegenerate?: () => void;
+  /** Format the "Send to Email" dialog will render and attach. */
+  emailFormat?: SummaryExportFormat;
+  onEmailFormatChange?: (format: SummaryExportFormat) => void;
+  /** Authenticated user's own address, shown in the email dialog's "Send to
+   * me" option. */
+  ownEmail?: string;
+  /** Emails the currently saved Summary (rendered to `emailFormat`) to the
+   * resolved recipient list from the email dialog — never a regenerated
+   * summary, never Meeting Notes. Omit to hide the Send to Email control
+   * entirely. */
+  onSendEmail?: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
+  sendingEmail?: boolean;
 };
 
 /**
@@ -49,6 +72,11 @@ function SummaryToolbar({
   onExport,
   exporting = false,
   onRegenerate,
+  emailFormat = "pdf",
+  onEmailFormatChange,
+  ownEmail,
+  onSendEmail,
+  sendingEmail = false,
   ...props
 }: SummaryToolbarProps) {
   return (
@@ -112,6 +140,38 @@ function SummaryToolbar({
           <RefreshCw data-icon="inline-start" />
           Regenerate
         </Button>
+
+        {onSendEmail && (
+          <>
+            <Separator orientation="vertical" className="h-5" />
+
+            <Select
+              value={emailFormat}
+              onValueChange={(value) =>
+                onEmailFormatChange?.(value as SummaryExportFormat)
+              }
+            >
+              <SelectTrigger aria-label="Email format" className="h-8 w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {EXPORT_FORMAT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <MeetingNotesEmailDialog
+              title="Send Summary"
+              description="Emails the currently saved Summary in the selected format. The summary is not regenerated before sending."
+              ownEmail={ownEmail}
+              sending={sendingEmail}
+              onSend={onSendEmail}
+            />
+          </>
+        )}
       </div>
     </div>
   );

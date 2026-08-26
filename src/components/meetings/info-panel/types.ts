@@ -17,7 +17,9 @@ export type RecordingInfoData = {
   type: RecordingType;
   /** Total length in seconds. Omit or null while duration is unknown. */
   durationSeconds?: number | null;
-  sizeBytes?: number;
+  /** `null` means no recording was ever persisted (e.g. a Live Meeting) —
+   * distinct from `undefined` (still loading/unknown). */
+  sizeBytes?: number | null;
   /** Pre-formatted quality label, e.g. "High · 48kHz". */
   quality?: string;
 };

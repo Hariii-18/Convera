@@ -1,13 +1,15 @@
 """Cloud LLM inference via OpenAI's Chat Completions API. Used for Summary
-generation (see `app.services.ai.factory.get_summary_ai_provider`) and
-Normalization (see `app.services.ai.factory.get_normalization_ai_provider`)
-so neither depends on a local Ollama server / model resources.
+generation (see `app.services.ai.factory.get_summary_ai_provider`),
+Normalization (see `app.services.ai.factory.get_normalization_ai_provider`),
+and Timeline generation (see `app.services.timeline_service`, which selects
+this provider via `get_summary_ai_provider` too) so none of them depend on a
+local Ollama server / model resources.
 
-`generate_structured_summary` and `normalize_transcript` are implemented.
-Translation keeps running through the Ollama provider (`ai_provider`
-setting) and is out of scope for this provider — calling `translate`,
-`translate_transcript`, `summarize`, or `extract_action_items` raises
-`NotImplementedError`.
+`generate_structured_summary`, `normalize_transcript`, and
+`generate_timeline` are implemented. Translation keeps running through the
+Ollama provider (`ai_provider` setting) and is out of scope for this
+provider — calling `translate`, `translate_transcript`, `summarize`, or
+`extract_action_items` raises `NotImplementedError`.
 """
 
 from __future__ import annotations
@@ -29,6 +31,7 @@ from app.services.ai.base import (
     SummaryResult,
     SummaryTextItem,
     SummaryTopic,
+    TimelineEvent,
     TimelineResult,
     TranscriptChunk,
     TranscriptTranslationResult,
@@ -53,6 +56,20 @@ _NORMALIZATION_SYSTEM_PROMPT = (
     "Return only a single JSON object (no markdown, no explanation) with "
     'exactly one key "segments": an array of objects with keys "i" (the '
     'original index) and "text" (the cleaned text).'
+)
+
+_TIMELINE_SYSTEM_PROMPT = (
+    "You are identifying key moments in a timestamped meeting transcript. You "
+    "will be given a JSON array of chunks, each with \"start\" (seconds), "
+    "\"end\" (seconds), and \"text\". Identify notable topic changes or key "
+    "moments actually present in the transcript — never invent a moment that "
+    "isn't grounded in the given text. Return only a single JSON object (no "
+    'markdown, no explanation) with exactly one key "events": an array of '
+    'objects with keys "start" (the timestamp in seconds, as a number, taken '
+    'from one of the given chunks) and "label" (a short description, a few '
+    "words, of what happens at that moment). Order events by \"start\" "
+    "ascending. Use an empty array if nothing stands out as a distinct "
+    "moment."
 )
 
 _STRUCTURED_SUMMARY_SYSTEM_PROMPT = (
@@ -225,7 +242,37 @@ class OpenAIProvider(AIProvider):
         raise NotImplementedError("OpenAIProvider only implements generate_structured_summary")
 
     def generate_timeline(self, chunks: list[TranscriptChunk]) -> TimelineResult:
-        raise NotImplementedError("OpenAIProvider only implements generate_structured_summary")
+        if not chunks:
+            return TimelineResult(events=[])
+
+        indexed = [
+            {"start": chunk.start, "end": chunk.end, "text": chunk.text} for chunk in chunks
+        ]
+        user_prompt = f"Transcript chunks:\n{json.dumps(indexed, ensure_ascii=False)}"
+
+        raw = self._chat_completion_json(
+            system_prompt=_TIMELINE_SYSTEM_PROMPT, user_prompt=user_prompt
+        )
+        parsed = self._parse_json_object(raw)
+        events_raw = parsed.get("events") if parsed is not None else None
+        if not isinstance(events_raw, list):
+            logger.warning("OpenAI returned non-JSON timeline response; returning no events")
+            return TimelineResult(events=[])
+
+        events: list[TimelineEvent] = []
+        for entry in events_raw:
+            if not isinstance(entry, dict):
+                continue
+            label = str(entry.get("label", "")).strip()
+            if not label or "start" not in entry:
+                continue
+            try:
+                start = float(entry["start"])
+            except (TypeError, ValueError):
+                continue
+            events.append(TimelineEvent(start=start, label=label))
+
+        return TimelineResult(events=events)
 
     def normalize_transcript(
         self, segments: list[TranscriptChunk], *, language: str | None = None

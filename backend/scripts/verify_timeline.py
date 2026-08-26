@@ -2,10 +2,12 @@
 configured database and AI provider (no mocks).
 
 Exercises the real app (in-process, via TestClient): registers two
-throwaway users, creates a meeting with a real transcript (segments copied
-from an actual production conversation), runs the real
-`run_post_transcription_pipeline` (real Ollama call, real DB persistence),
-then drives the real `GET /api/v1/meetings/{meeting_id}/timeline` endpoint
+throwaway users, creates a meeting with a real transcript (a realistic
+multi-topic planning conversation, `scripts/fixtures/real_segments.json`),
+runs the real `run_post_transcription_pipeline` (a real call to whichever
+provider `SUMMARY_AI_PROVIDER` selects — OpenAI by default; see
+`app.services.timeline_service`, real DB persistence), then drives the real
+`GET /api/v1/meetings/{meeting_id}/timeline` endpoint
 for chronological ordering, auth isolation (404), the no-timeline-yet empty
 state (200 + []), and rerun/idempotency (no duplication). Cleans up every
 row it creates.
@@ -55,9 +57,7 @@ def auth(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-REAL_SEGMENTS_PATH = Path(
-    "/tmp/claude-1000/-workspaces-Convera/8a065a70-4c15-4a78-a78f-222d3299b755/scratchpad/real_segments.json"
-)
+REAL_SEGMENTS_PATH = Path(__file__).parent / "fixtures" / "real_segments.json"
 
 
 def main() -> int:
@@ -140,13 +140,13 @@ def main() -> int:
     check("5b. pre-pipeline meeting -> 200", resp.status_code == 200, resp.text)
     check("5b. pre-pipeline meeting -> empty events list", resp.json().get("events") == [], resp.json())
 
-    # --- 2. Run the REAL post-transcription pipeline (real Ollama call,
-    # real DB persistence) against meeting A. Timeline generation against a
-    # local Ollama call can transiently time out (slow/cold model, retried
-    # by the app's own design -- see pipeline_service's "not
-    # existing_summary.timeline_events: retry" logic) so retry a few times
-    # exactly as a real subsequent pipeline run would, rather than treating
-    # one slow attempt as a failure.
+    # --- 2. Run the REAL post-transcription pipeline (real AI provider
+    # call, real DB persistence) against meeting A. Timeline generation can
+    # transiently fail (rate limit, cold start, retried by the app's own
+    # design -- see pipeline_service's "not existing_summary.timeline_events:
+    # retry" logic) so retry a few times exactly as a real subsequent
+    # pipeline run would, rather than treating one slow attempt as a
+    # failure.
     stages: list[str] = []
     first_run_count = 0
     for attempt in range(3):

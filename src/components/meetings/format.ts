@@ -83,8 +83,13 @@ export function formatDateTime(value: string | Date, timeZone?: string) {
   });
 }
 
-/** "1.2 MB", "845 KB", "0 B" */
-export function formatBytes(bytes?: number) {
+/** "1.2 MB", "845 KB", "0 B". `null` means the caller has already determined
+ * no recording was ever persisted (e.g. a Live Meeting, whose audio is
+ * never saved to storage) — distinct from `undefined` (still loading/
+ * unknown), so it renders an honest "No recording stored" instead of a
+ * misleading "0 B". */
+export function formatBytes(bytes?: number | null) {
+  if (bytes === null) return "No recording stored";
   if (bytes === undefined) return "—";
   if (bytes === 0) return "0 B";
 

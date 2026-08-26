@@ -11,8 +11,15 @@ from app.crud.summary import get_summary_by_meeting_id
 from app.db.session import get_db
 from app.models.summary import Summary
 from app.models.user import User
-from app.schemas.summary import SummaryActionItemUpdate, SummaryGenerate, SummaryRead
+from app.schemas.summary import (
+    SummaryActionItemUpdate,
+    SummaryEmailRequest,
+    SummaryEmailResponse,
+    SummaryGenerate,
+    SummaryRead,
+)
 from app.services.export.export_service import export_summary
+from app.services.summary_email_service import send_summary_email
 from app.services.summary_service import generate_summary, update_summary_action_item
 
 router = APIRouter(prefix="/summaries", tags=["summaries"])
@@ -76,3 +83,20 @@ def export(
         media_type=content_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/{meeting_id}/email", response_model=SummaryEmailResponse)
+def email(
+    meeting_id: uuid.UUID,
+    body: SummaryEmailRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> SummaryEmailResponse:
+    """Emails the currently saved Summary (never regenerated) to the
+    resolved recipient list. Sends only the Summary export — never Meeting
+    Notes — and leaves the Meeting Notes/Conversation email flows untouched.
+    """
+    recipients = send_summary_email(
+        db, meeting_id, current_user, body.format, body.send_to_me, body.recipients
+    )
+    return SummaryEmailResponse(sent=True, recipients=recipients)

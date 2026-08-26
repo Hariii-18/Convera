@@ -2,11 +2,15 @@
 
 Reuses the existing `AIProvider.generate_timeline` (see
 `app.services.ai.base`) — no second timeline prompt/model. Provider
-selection reuses `get_ai_provider()` (the `AI_PROVIDER` axis, Ollama by
-default) rather than `get_summary_ai_provider()`: Ollama is currently the
-only provider with a real `generate_timeline` implementation (OpenAI's
-raises `NotImplementedError`), and `AI_PROVIDER` is the axis that already
-gates other Ollama-only features (translation).
+selection reuses `get_summary_ai_provider()` (`SUMMARY_AI_PROVIDER`,
+OpenAI by default) rather than `get_ai_provider()` (the `AI_PROVIDER` axis,
+Ollama by default): Timeline generation previously ran on `get_ai_provider`,
+whose default (Ollama, a local server) requires an Ollama instance that
+isn't part of this deployment, so every Timeline generation silently failed
+(caught below, leaving `timeline_events` empty forever) while Summary
+generation succeeded on the same transcript via OpenAI. Both `OpenAIProvider`
+and `OllamaProvider` implement `generate_timeline`, so this follows whichever
+cloud/local provider Summary generation is already configured to use.
 """
 
 import logging
@@ -17,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.crud.summary import set_timeline_events
 from app.crud.transcript import get_transcript_by_meeting_id
 from app.models.summary import Summary
-from app.services.ai import TranscriptChunk, get_ai_provider
+from app.services.ai import TranscriptChunk, get_summary_ai_provider
 
 logger = logging.getLogger("converra")
 
@@ -49,7 +53,7 @@ def generate_timeline_for_meeting(db: Session, meeting_id: uuid.UUID, summary: S
         return summary
 
     try:
-        result = get_ai_provider().generate_timeline(chunks)
+        result = get_summary_ai_provider().generate_timeline(chunks)
     except Exception as exc:
         logger.warning(
             "Timeline generation failed for meeting %s, leaving timeline empty (retryable): %s",

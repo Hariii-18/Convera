@@ -14,6 +14,7 @@ import { SummaryToolbar } from "@/components/meetings/summary/summary-toolbar";
 import { countWords } from "@/components/meetings/format";
 import { buildSummaryText } from "@/components/meetings/summary/format";
 import type { ActionItemEdits } from "@/components/meetings/summary/edit-action-item-dialog";
+import type { MeetingNotesEmailSendPayload } from "@/components/meetings/notes/meeting-notes-email-dialog";
 import type {
   ActionItemData,
   DecisionData,
@@ -51,6 +52,17 @@ type SummaryViewerProps = React.ComponentProps<"div"> & {
   exporting?: boolean;
   /** Presentational placeholder — the caller owns what regenerating actually does. */
   onRegenerate?: () => void;
+  /** Format the "Send to Email" dialog will render and attach. */
+  emailFormat?: SummaryExportFormat;
+  onEmailFormatChange?: (format: SummaryExportFormat) => void;
+  /** Authenticated user's own address, shown in the email dialog's "Send to
+   * me" option. */
+  ownEmail?: string;
+  /** Emails the currently saved Summary (rendered to `emailFormat`) to the
+   * resolved recipient list. Omit to hide the Send to Email control
+   * entirely. */
+  onSendEmail?: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
+  sendingEmail?: boolean;
 };
 
 /**
@@ -77,6 +89,11 @@ function SummaryViewer({
   onExport,
   exporting = false,
   onRegenerate,
+  emailFormat,
+  onEmailFormatChange,
+  ownEmail,
+  onSendEmail,
+  sendingEmail = false,
   ...props
 }: SummaryViewerProps) {
   const summaryText = React.useMemo(
@@ -116,6 +133,11 @@ function SummaryViewer({
         onExport={onExport}
         exporting={exporting}
         onRegenerate={onRegenerate}
+        emailFormat={emailFormat}
+        onEmailFormatChange={onEmailFormatChange}
+        ownEmail={ownEmail}
+        onSendEmail={onSendEmail}
+        sendingEmail={sendingEmail}
       />
 
       <ExecutiveSummary summary={executiveSummary} loading={loading} />

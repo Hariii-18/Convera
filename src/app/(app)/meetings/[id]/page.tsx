@@ -71,6 +71,8 @@ import { useMeetingInsights } from "@/features/insights/hooks/use-meeting-insigh
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { useUpdateActionItem } from "@/features/summaries/hooks/use-update-action-item";
 import { useExportSummary } from "@/features/summaries/hooks/use-export-summary";
+import { useSendSummaryEmail } from "@/features/summaries/hooks/use-send-summary-email";
+import type { SummaryExportFormat } from "@/features/summaries/types";
 import { useMeetingNotes } from "@/features/meeting-notes/hooks/use-meeting-notes";
 import { useUpdateMeetingNotes } from "@/features/meeting-notes/hooks/use-update-meeting-notes";
 import { useExportMeetingNotes } from "@/features/meeting-notes/hooks/use-export-meeting-notes";
@@ -203,8 +205,15 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   });
   const regenerateSummary = useRegenerateSummary(id);
   const exportSummary = useExportSummary(id);
+  const sendSummaryEmail = useSendSummaryEmail(id);
+  const [summaryEmailFormat, setSummaryEmailFormat] =
+    useState<SummaryExportFormat>("pdf");
 
-  const { data: timelineEvents, isLoading: isTimelineLoading } = useTimeline(id, {
+  const {
+    data: timelineEvents,
+    isLoading: isTimelineLoading,
+    isError: isTimelineError,
+  } = useTimeline(id, {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
@@ -296,6 +305,17 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const recordingType = deriveRecordingType(recordingUpload?.mimeType);
 
+  // Live Meeting audio is never persisted to storage — the backend creates
+  // a placeholder `Upload` row with `size_bytes` hardcoded to 0 (see
+  // `live_meeting_service._get_or_create_live_placeholder_upload`), which
+  // isn't a real "empty recording," just "no recording was ever saved."
+  // `null` (vs. `undefined` for "still loading") tells the stat/info-panel
+  // formatters to render an honest "No recording stored" instead of "0 B".
+  const recordingSizeBytes: number | null | undefined =
+    meeting?.sourceType === "live-browser-meeting"
+      ? null
+      : recordingUpload?.sizeBytes;
+
   const {
     data: playback,
     isLoading: isPlaybackLoading,
@@ -326,7 +346,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
       "failed",
       "pending",
     ),
-    recordingSizeBytes: recordingUpload?.sizeBytes,
+    recordingSizeBytes,
   };
 
   // `audioQuality` (e.g. "High · 48kHz") has no backend source — the upload
@@ -355,7 +375,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     ? {
         type: recordingType,
         durationSeconds: recordingDurationSeconds,
-        sizeBytes: recordingUpload?.sizeBytes,
+        sizeBytes: recordingSizeBytes,
       }
     : undefined;
 
@@ -532,7 +552,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
           <WorkspaceHeader
             title={meeting.title}
             status={meeting.status}
-            durationSeconds={meeting.durationSeconds}
+            durationSeconds={recordingDurationSeconds}
             createdAt={meeting.createdAt}
             timeZone={timeZone}
             onExport={() =>
@@ -579,7 +599,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             metadata={{
               title: meeting.title,
               status: meeting.status,
-              durationSeconds: meeting.durationSeconds,
+              durationSeconds: recordingDurationSeconds,
               createdAt: meeting.createdAt,
               updatedAt: meeting.updatedAt,
             }}
@@ -752,6 +772,11 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                   : undefined
               }
             />
+
+            {/* Renaming here updates every "Speaker: " label above, plus
+                Transcript, Meeting Notes, and every export/email — all read
+                the same MeetingSpeaker rows by speaker_key at render time. */}
+            {!isGuest && <SpeakersSection meetingId={id} enabled={isReady} />}
           </div>
         )}
 
@@ -840,6 +865,26 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                     toast.error(extractErrorMessage(mutationError)),
                 }),
               )
+            }
+            emailFormat={summaryEmailFormat}
+            onEmailFormatChange={setSummaryEmailFormat}
+            ownEmail={ownEmail}
+            sendingEmail={sendSummaryEmail.isPending}
+            onSendEmail={
+              isGuest || !summary
+                ? undefined
+                : async ({ sendToMe, recipients }) => {
+                    if (sendSummaryEmail.isPending) return;
+                    const result = await sendSummaryEmail.mutateAsync({
+                      format: summaryEmailFormat,
+                      sendToMe,
+                      recipients,
+                    });
+                    const count = result.recipients.length;
+                    toast.success(
+                      `${result.format.toUpperCase()} emailed to ${count} recipient${count === 1 ? "" : "s"}`,
+                    );
+                  }
             }
           />
         )}
@@ -941,6 +986,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             onExpandedChange={setTimelineExpanded}
             onItemClick={(event) => player.seek(event.timestampSeconds)}
             activeTimeSeconds={player.isPlaying ? player.currentTime : undefined}
+            emptyTitle={isTimelineError ? "Couldn't load timeline" : undefined}
+            emptyDescription={
+              isTimelineError
+                ? "Something went wrong fetching the timeline. Try refreshing the page."
+                : undefined
+            }
           />
         )}
 
