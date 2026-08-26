@@ -15,11 +15,12 @@ from app.schemas.transcript import (
     TranscriptNormalize,
     TranscriptRead,
     TranscriptTranslate,
+    TranscriptUpdate,
 )
 from app.services.conversation_email_service import send_conversation_email
 from app.services.export.conversation_export_service import export_conversation
 from app.services.normalization_service import generate_normalized_transcript
-from app.services.transcript_service import get_transcript, to_transcript_read
+from app.services.transcript_service import get_transcript, to_transcript_read, update_transcript
 from app.services.translation_service import generate_translated_transcript
 
 router = APIRouter(prefix="/transcripts", tags=["transcripts"])
@@ -32,6 +33,16 @@ def get_by_meeting(
     current_user: User = Depends(get_current_user),
 ) -> TranscriptRead:
     return get_transcript(db, meeting_id, current_user.id)
+
+
+@router.patch("", response_model=TranscriptRead)
+def update(
+    update_in: TranscriptUpdate,
+    meeting_id: uuid.UUID = Query(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TranscriptRead:
+    return update_transcript(db, meeting_id, current_user.id, update_in)
 
 
 @router.post("/normalize", response_model=TranscriptRead, status_code=status.HTTP_201_CREATED)

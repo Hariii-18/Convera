@@ -22,6 +22,10 @@ type TranscriptViewerProps = React.ComponentProps<"div"> & {
   onEditModeChange?: (editMode: boolean) => void;
   /** Controlled — the caller owns the transcript data and applies the edit. */
   onBlockTextChange?: (blockId: string, text: string) => void;
+  /** Persists the current edits. Omit to fall back to a plain on/off edit
+   * toggle with no Save/Cancel step. */
+  onSave?: () => void;
+  saving?: boolean;
   onTimestampClick?: (seconds: number) => void;
   onCopy?: () => void;
   emptyTitle?: string;
@@ -61,6 +65,8 @@ function TranscriptViewer({
   editMode = false,
   onEditModeChange,
   onBlockTextChange,
+  onSave,
+  saving = false,
   onTimestampClick,
   onCopy,
   emptyTitle = "No transcript yet",
@@ -123,6 +129,8 @@ function TranscriptViewer({
         onSearchChange={onSearchChange}
         editMode={editMode}
         onEditModeChange={onEditModeChange}
+        onSave={onSave}
+        saving={saving}
         wordCount={blocks.length > 0 ? wordCount : undefined}
         transcriptText={transcriptText}
         onCopy={onCopy}

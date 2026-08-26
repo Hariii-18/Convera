@@ -50,6 +50,7 @@ import { useUploads } from "@/features/uploads/hooks/use-uploads";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
 import { useNormalizeTranscript } from "@/features/transcripts/hooks/use-normalize-transcript";
 import { useTranslateTranscript } from "@/features/transcripts/hooks/use-translate-transcript";
+import { useUpdateTranscript } from "@/features/transcripts/hooks/use-update-transcript";
 import { useExportConversation } from "@/features/transcripts/hooks/use-export-conversation";
 import { useSendConversationEmail } from "@/features/transcripts/hooks/use-send-conversation-email";
 import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
@@ -162,6 +163,7 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   });
   const normalizeTranscript = useNormalizeTranscript(id);
   const translateTranscript = useTranslateTranscript(id);
+  const updateTranscript = useUpdateTranscript(id);
   const exportConversation = useExportConversation(id);
   const sendConversationEmail = useSendConversationEmail(id);
   const [conversationExportFormat, setConversationExportFormat] =
@@ -331,9 +333,10 @@ export default function MeetingPage({ params }: MeetingPageProps) {
   >("raw");
   const [translationLanguage, setTranslationLanguage] =
     useState<TranslationLanguage>("en");
-  // Edits are local-only (no persistence endpoint yet); reset whenever the
-  // fetched transcript changes so a fresh/retried result isn't shadowed by
-  // stale edits made against the previous one.
+  // In-progress edit draft, applied only on Save (see `updateTranscript`
+  // below) — reset whenever the fetched transcript changes so a
+  // fresh/retried result, or a just-saved one, isn't shadowed by stale
+  // edits made against the previous one.
   const [editedBlocks, setEditedBlocks] = useState<
     TranscriptBlockData[] | null
   >(null);
@@ -531,7 +534,12 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             searchValue={transcriptSearch}
             onSearchChange={setTranscriptSearch}
             editMode={transcriptEditMode}
-            onEditModeChange={setTranscriptEditMode}
+            onEditModeChange={(editMode) =>
+              guard("manage-meeting", () => {
+                setTranscriptEditMode(editMode);
+                if (!editMode) setEditedBlocks(null);
+              })
+            }
             onBlockTextChange={
               transcriptView === "normalized" || transcriptView === "translated"
                 ? undefined
@@ -541,6 +549,24 @@ export default function MeetingPage({ params }: MeetingPageProps) {
                         block.id === blockId ? { ...block, text } : block,
                       ),
                     )
+            }
+            saving={updateTranscript.isPending}
+            onSave={() =>
+              guard("manage-meeting", () => {
+                const blocks = editedBlocks ?? transcript?.blocks ?? [];
+                updateTranscript.mutate(
+                  { segments: blocks.map((block) => ({ text: block.text })) },
+                  {
+                    onSuccess: () => {
+                      setTranscriptEditMode(false);
+                      setEditedBlocks(null);
+                      toast.success("Transcript saved");
+                    },
+                    onError: (mutationError) =>
+                      toast.error(extractErrorMessage(mutationError)),
+                  },
+                );
+              })
             }
             onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
             onCopy={() =>

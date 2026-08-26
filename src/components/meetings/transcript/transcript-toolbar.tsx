@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Languages, Pencil, Sparkles } from "lucide-react";
+import { Languages, Loader2, Pencil, Sparkles, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -23,6 +23,11 @@ type TranscriptToolbarProps = React.ComponentProps<"div"> & {
   onSearchChange?: (value: string) => void;
   editMode?: boolean;
   onEditModeChange?: (editMode: boolean) => void;
+  /** Persists the current edits. Only used while `editMode` is on — when
+   * omitted, the edit toggle behaves as a plain on/off switch with no
+   * Save/Cancel step (e.g. the style guide's uncontrolled demo). */
+  onSave?: () => void;
+  saving?: boolean;
   /** Pre-counted word total, shown as-is. */
   wordCount?: number;
   /** Full transcript text, used by the copy button. */
@@ -55,6 +60,8 @@ function TranscriptToolbar({
   onSearchChange,
   editMode = false,
   onEditModeChange,
+  onSave,
+  saving = false,
   wordCount,
   transcriptText = "",
   onCopy,
@@ -172,17 +179,36 @@ function TranscriptToolbar({
           </>
         )}
 
-        <Button
-          type="button"
-          variant={editMode ? "secondary" : "outline"}
-          size="sm"
-          aria-pressed={editMode}
-          onClick={() => onEditModeChange?.(!editMode)}
-          disabled={!onEditModeChange}
-        >
-          <Pencil data-icon="inline-start" />
-          {editMode ? "Editing" : "Edit"}
-        </Button>
+        {editMode && onSave ? (
+          <>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => onEditModeChange?.(false)}
+              disabled={saving}
+            >
+              <X data-icon="inline-start" />
+              Cancel
+            </Button>
+            <Button type="button" size="sm" onClick={onSave} disabled={saving}>
+              {saving ? <Loader2 data-icon="inline-start" className="animate-spin" /> : null}
+              {saving ? "Saving…" : "Save"}
+            </Button>
+          </>
+        ) : (
+          <Button
+            type="button"
+            variant={editMode ? "secondary" : "outline"}
+            size="sm"
+            aria-pressed={editMode}
+            onClick={() => onEditModeChange?.(!editMode)}
+            disabled={!onEditModeChange}
+          >
+            <Pencil data-icon="inline-start" />
+            {editMode ? "Editing" : "Edit"}
+          </Button>
+        )}
 
         <Separator orientation="vertical" className="h-5" />
 

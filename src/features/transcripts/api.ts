@@ -6,6 +6,7 @@ import type {
   ConversationEmailResponse,
   ConversationExportFormat,
   TranscriptResponse,
+  TranscriptUpdateRequest,
   TranslationLanguage,
 } from "@/features/transcripts/types";
 
@@ -37,6 +38,20 @@ export const transcriptsApi = {
       }
       throw error;
     }
+  },
+
+  /** Persists edits to the raw transcript's segment text. Partial in shape
+   * only — every stored segment's text must be supplied, in order; the
+   * backend rejects a length mismatch rather than guessing.
+   */
+  async update(
+    meetingId: string,
+    payload: TranscriptUpdateRequest,
+  ): Promise<TranscriptResponse> {
+    const { data } = await apiClient.patch<TranscriptResponse>("/transcripts", payload, {
+      params: { meeting_id: meetingId },
+    });
+    return data;
   },
 
   /** Generates (or regenerates) the readability-normalized transcript. */

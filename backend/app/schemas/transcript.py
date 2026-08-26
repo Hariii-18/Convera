@@ -25,6 +25,29 @@ class TranscriptSegmentRead(BaseModel):
     speaker_name: str | None = None
 
 
+class TranscriptSegmentTextUpdate(BaseModel):
+    """One edited segment. Only `text` is client-writable — `start`/`end`/
+    `speaker_key` are never accepted here (see `TranscriptUpdate`), so there
+    is nothing in this schema a client could use to move a segment in time
+    or reassign it to a different speaker.
+    """
+
+    text: str
+
+
+class TranscriptUpdate(BaseModel):
+    """Body for `PATCH /transcripts`. `segments` must be the same length as
+    the meeting's currently stored raw `Transcript.segments` — one entry per
+    existing segment, in the same order — so the update can only ever
+    replace segment text in place, never add, remove, or reorder segments.
+    `crud.transcript.update_transcript_segments` rejects a length mismatch.
+    Only the raw `transcript`/`segments` columns are touched; `normalized_*`
+    and `translated_*` are separate columns this never writes to.
+    """
+
+    segments: list[TranscriptSegmentTextUpdate]
+
+
 class TranscriptNormalize(BaseModel):
     meeting_id: uuid.UUID
 

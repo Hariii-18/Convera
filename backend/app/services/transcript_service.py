@@ -14,9 +14,9 @@ from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
 from app.crud.meeting import get_meeting
-from app.crud.transcript import get_transcript_by_meeting_id
+from app.crud.transcript import get_transcript_by_meeting_id, update_transcript_segments
 from app.models.transcript import Transcript
-from app.schemas.transcript import TranscriptRead
+from app.schemas.transcript import TranscriptRead, TranscriptUpdate
 from app.services.speaker_resolution import build_speaker_name_map, resolve_segments
 
 
@@ -63,5 +63,33 @@ def get_transcript(db: Session, meeting_id: uuid.UUID, user_id: int) -> Transcri
     transcript = get_transcript_by_meeting_id(db, meeting_id)
     if transcript is None:
         raise AppError("Transcript not found", status.HTTP_404_NOT_FOUND)
+
+    return to_transcript_read(db, transcript)
+
+
+def update_transcript(
+    db: Session, meeting_id: uuid.UUID, user_id: int, update: TranscriptUpdate
+) -> TranscriptRead:
+    """Ownership-checked persistence of a user's edits to the raw transcript's
+    segment text. Mirrors `meeting_notes_service.update_meeting_notes`'s
+    shape: ownership check, then a single CRUD call, then the same
+    already-resolved read schema `get_transcript` returns, so a save and a
+    reload produce identical shapes.
+    """
+    if get_meeting(db, meeting_id, user_id) is None:
+        raise AppError("Meeting not found", status.HTTP_404_NOT_FOUND)
+
+    transcript = get_transcript_by_meeting_id(db, meeting_id)
+    if transcript is None:
+        raise AppError("Transcript not found", status.HTTP_404_NOT_FOUND)
+
+    try:
+        transcript = update_transcript_segments(
+            db,
+            transcript,
+            edited_segments=[segment.model_dump() for segment in update.segments],
+        )
+    except ValueError as error:
+        raise AppError(str(error), status.HTTP_400_BAD_REQUEST) from error
 
     return to_transcript_read(db, transcript)

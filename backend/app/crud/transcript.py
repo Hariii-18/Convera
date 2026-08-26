@@ -76,6 +76,52 @@ def upsert_transcript(
     return record
 
 
+def update_transcript_segments(
+    db: Session,
+    transcript: Transcript,
+    *,
+    edited_segments: list[dict],
+) -> Transcript:
+    """Applies a user edit to the raw transcript's segment text.
+
+    Only `text` ever changes. `start`/`end`/`speaker_key` are always carried
+    over from the segment already stored at that index — never taken from
+    the caller — so an edit can never shift a segment's timing or reassign
+    it to a different speaker, regardless of what the request body contains.
+    `edited_segments` must be the same length as `transcript.segments`
+    (raises `ValueError` otherwise, translated to a 400 by the caller): a
+    segment can be re-worded but never added, removed, or reordered.
+
+    Recomputes `transcript` (the flat text) and `word_count` from the edited
+    segments the same way the transcription pipeline derives them initially
+    (`" ".join` of segment texts — see `faster_whisper.py`), so both stay
+    consistent with the edited segments.
+
+    Never touches `normalized_transcript`/`normalized_segments`/
+    `translated_transcript`/`translated_segments` — those are separate
+    AI-generated columns an edit to the raw transcript must not silently
+    change; regenerating them is only ever triggered explicitly via
+    `/transcripts/normalize` and `/transcripts/translate`.
+    """
+    existing_segments = transcript.segments
+    if len(edited_segments) != len(existing_segments):
+        raise ValueError("Segment count does not match the stored transcript")
+
+    merged_segments = [
+        {**existing, "text": edited["text"]}
+        for existing, edited in zip(existing_segments, edited_segments)
+    ]
+    text_parts = [segment["text"].strip() for segment in merged_segments if segment["text"].strip()]
+    joined_text = " ".join(text_parts)
+
+    transcript.segments = merged_segments
+    transcript.transcript = joined_text
+    transcript.word_count = len(joined_text.split()) if joined_text else 0
+    db.commit()
+    db.refresh(transcript)
+    return transcript
+
+
 def update_normalized_transcript(
     db: Session,
     transcript: Transcript,

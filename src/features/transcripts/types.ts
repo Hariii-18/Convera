@@ -38,6 +38,14 @@ export type TranscriptResponse = {
   updated_at: string;
 };
 
+/** Body for `PATCH /transcripts`. One entry per segment already stored in
+ * the raw transcript, same order — only `text` is client-writable; the
+ * backend always keeps each segment's `start`/`end`/`speaker_key` as
+ * currently stored, regardless of what's sent here. */
+export type TranscriptUpdateRequest = {
+  segments: { text: string }[];
+};
+
 /** Formats the Conversation export endpoint renders — PDF/DOCX only for now. */
 export type ConversationExportFormat = "pdf" | "docx";
 
