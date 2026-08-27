@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.upload import Upload
@@ -41,6 +42,15 @@ def list_uploads(db: Session, user_id: int) -> list[Upload]:
         .order_by(Upload.created_at.desc())
         .all()
     )
+
+
+def get_total_storage_bytes(db: Session, user_id: int) -> int:
+    total = (
+        db.query(func.coalesce(func.sum(Upload.size_bytes), 0))
+        .filter(Upload.user_id == user_id, Upload.deleted_at.is_(None))
+        .scalar()
+    )
+    return int(total)
 
 
 def get_upload(db: Session, upload_id: uuid.UUID, user_id: int) -> Upload | None:

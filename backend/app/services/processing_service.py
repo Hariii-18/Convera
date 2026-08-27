@@ -23,6 +23,7 @@ from app.models.processing_job import ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.meeting import MeetingUpdate
+from app.services.summary_service import generate_summary
 from app.workers.processor import (
     download_upload,
     extract_audio_track,
@@ -129,6 +130,16 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
             duration=result.duration,
             word_count=result.word_count,
         )
+
+        job = get_processing_job_by_id(db, job_id)
+        if job is None:
+            return
+        job = update_job_progress(db, job, status="processing", stage="Generating summary", progress=95)
+
+        try:
+            generate_summary(db, job.meeting_id)
+        except Exception as exc:  # noqa: BLE001 (summary failure must not fail a successful transcription)
+            logger.warning("Summary generation failed for meeting %s: %s", job.meeting_id, exc)
 
         job = get_processing_job_by_id(db, job_id)
         if job is None:

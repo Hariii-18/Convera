@@ -46,6 +46,7 @@ import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
 import { isTerminalStatus } from "@/features/processing/mappers";
@@ -86,6 +87,7 @@ export default function DashboardPage() {
   } = useDashboardStats({ enabled: isReady && !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
+  const downloadTranscript = useDownloadTranscript();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
@@ -317,7 +319,14 @@ export default function DashboardPage() {
               guard("rename-meeting", () => setRenameTarget(meeting))
             }
             onDownloadMeeting={(meeting) =>
-              toast(`Download "${meeting.title}"`)
+              downloadTranscript.mutate(
+                { meetingId: meeting.id, format: "txt", fileName: `${meeting.title}.txt` },
+                {
+                  onSuccess: () => toast.success(`Downloaded "${meeting.title}.txt"`),
+                  onError: (mutationError) =>
+                    toast.error(extractErrorMessage(mutationError)),
+                },
+              )
             }
             onDeleteMeeting={(meeting) =>
               guard("delete-meeting", () => setDeleteTarget(meeting))

@@ -25,6 +25,7 @@ type TranscriptViewerProps = React.ComponentProps<"div"> & {
   onCopy?: () => void;
   emptyTitle?: string;
   emptyDescription?: string;
+  emptyAction?: React.ReactNode;
   skeletonCount?: number;
 };
 
@@ -51,6 +52,7 @@ function TranscriptViewer({
   onCopy,
   emptyTitle = "No transcript yet",
   emptyDescription = "Once this meeting is transcribed, the full transcript will appear here.",
+  emptyAction,
   skeletonCount = 6,
   ...props
 }: TranscriptViewerProps) {
@@ -117,6 +119,7 @@ function TranscriptViewer({
           icon={<FileText />}
           title={emptyTitle}
           description={emptyDescription}
+          action={emptyAction}
           className="rounded-none border-0"
         />
       ) : (

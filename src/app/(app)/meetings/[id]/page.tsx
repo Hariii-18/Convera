@@ -30,7 +30,9 @@ import { useMeeting } from "@/features/meetings/hooks/use-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useProcessingJob } from "@/features/processing/hooks/use-processing-job";
+import { useRetryProcessing } from "@/features/processing/hooks/use-retry-processing";
 import { useTranscript } from "@/features/transcripts/hooks/use-transcript";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { useSummary } from "@/features/summaries/hooks/use-summary";
 import { useRegenerateSummary } from "@/features/summaries/hooks/use-regenerate-summary";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
@@ -68,12 +70,21 @@ export default function MeetingPage({ params }: MeetingPageProps) {
     enabled: isReady && !isGuest,
     jobStatus: processingJob?.status ?? null,
   });
+  const retryProcessing = useRetryProcessing();
+  const isTranscriptFailed =
+    !isTranscriptLoading &&
+    !transcript &&
+    processingJob?.status === "failed";
 
   const {
     data: summary,
     isLoading: isSummaryLoading,
-  } = useSummary(id, { enabled: isReady && !isGuest });
+  } = useSummary(id, {
+    enabled: isReady && !isGuest,
+    jobStatus: processingJob?.status ?? null,
+  });
   const regenerateSummary = useRegenerateSummary(id);
+  const downloadTranscript = useDownloadTranscript();
 
   const activity = useMemo<ActivityItem[]>(() => {
     if (!meeting) return [];
@@ -152,6 +163,30 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
   const [timelineSearch, setTimelineSearch] = useState("");
   const [timelineExpanded, setTimelineExpanded] = useState(false);
+
+  // Only txt/json are backed by a real generator (the transcript itself,
+  // rendered client-side by useDownloadTranscript) — pdf/docx have no export
+  // pipeline yet, so they're omitted rather than shown as broken buttons.
+  const transcriptExports = useMemo(() => {
+    if (!transcript) return [];
+    const lastGeneratedAt = processingJob?.completedAt ?? meeting?.updatedAt;
+    return [
+      { format: "txt" as const, lastGeneratedAt },
+      { format: "json" as const, lastGeneratedAt },
+    ];
+  }, [transcript, processingJob?.completedAt, meeting?.updatedAt]);
+
+  function handleDownloadExport(format: "pdf" | "docx" | "txt" | "json") {
+    if (format !== "txt" && format !== "json") return;
+    const fileName = `${meeting?.title ?? "meeting"}.${format}`;
+    downloadTranscript.mutate(
+      { meetingId: id, format, fileName },
+      {
+        onSuccess: () => toast.success(`Downloaded "${fileName}"`),
+        onError: (mutationError) => toast.error(extractErrorMessage(mutationError)),
+      },
+    );
+  }
 
   function handleRenameConfirm(title: string) {
     updateMeeting.mutate(
@@ -264,11 +299,37 @@ export default function MeetingPage({ params }: MeetingPageProps) {
             }
             onTimestampClick={(seconds) => toast(`Jump to ${seconds}s`)}
             onCopy={() => toast("Transcript copied")}
-            emptyTitle={isTranscriptError ? "Couldn't load transcript" : undefined}
+            emptyTitle={
+              isTranscriptError
+                ? "Couldn't load transcript"
+                : isTranscriptFailed
+                  ? "Transcription failed"
+                  : undefined
+            }
             emptyDescription={
               isTranscriptError
                 ? "Something went wrong fetching the transcript. Try refreshing the page."
-                : undefined
+                : isTranscriptFailed
+                  ? (processingJob?.errorMessage ??
+                    "Something went wrong while transcribing this recording.")
+                  : undefined
+            }
+            emptyAction={
+              isTranscriptFailed && processingJob ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={retryProcessing.isPending}
+                  onClick={() =>
+                    retryProcessing.mutate(processingJob.id, {
+                      onError: (mutationError) =>
+                        toast.error(extractErrorMessage(mutationError)),
+                    })
+                  }
+                >
+                  {retryProcessing.isPending ? "Retrying…" : "Retry transcription"}
+                </Button>
+              ) : undefined
             }
           />
         )}
@@ -326,12 +387,13 @@ export default function MeetingPage({ params }: MeetingPageProps) {
 
         {activeTab === "downloads" && (
           <DownloadsPanel
-            onDownload={(format) => toast(`Download ${format.toUpperCase()}`)}
-            onRegenerate={(format) =>
-              toast(`Regenerate ${format.toUpperCase()}`)
-            }
-            onDownloadHistoryEntry={(entry) =>
-              toast(`Download ${entry.fileName}`)
+            exports={transcriptExports}
+            loading={isGuest ? false : isTranscriptLoading}
+            onDownload={handleDownloadExport}
+            downloadingFormats={
+              downloadTranscript.isPending && downloadTranscript.variables
+                ? [downloadTranscript.variables.format]
+                : []
             }
           />
         )}

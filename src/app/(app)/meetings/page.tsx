@@ -30,6 +30,7 @@ import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { searchMeetings } from "@/features/meetings/search";
 import { useGuestSession } from "@/features/guest/guest-provider";
 
@@ -53,6 +54,17 @@ export default function MeetingsPage() {
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
+  const downloadTranscript = useDownloadTranscript();
+
+  function handleDownload(meeting: Meeting) {
+    downloadTranscript.mutate(
+      { meetingId: meeting.id, format: "txt", fileName: `${meeting.title}.txt` },
+      {
+        onSuccess: () => toast.success(`Downloaded "${meeting.title}.txt"`),
+        onError: (mutationError) => toast.error(extractErrorMessage(mutationError)),
+      },
+    );
+  }
 
   const visibleMeetings = useMemo(() => {
     const base = search.trim()
@@ -179,7 +191,7 @@ export default function MeetingsPage() {
           isLoading={isLoading}
           onView={handleView}
           onRename={setRenameTarget}
-          onDownload={(meeting) => toast(`Download "${meeting.title}"`)}
+          onDownload={handleDownload}
           onDelete={setDeleteTarget}
           emptyTitle={isFiltered ? "No matching meetings" : undefined}
           emptyDescription={

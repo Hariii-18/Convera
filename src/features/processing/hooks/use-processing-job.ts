@@ -60,6 +60,14 @@ export function useProcessingJob(
       // doesn't sit on a stale "Processing" after this job finishes.
       queryClient.invalidateQueries({ queryKey: ["meetings", meetingId] });
       queryClient.invalidateQueries({ queryKey: ["meetings"] });
+      // The transcript row is written right before the job is marked
+      // completed — invalidate it too so the Transcript tab refreshes as
+      // soon as this job finishes instead of waiting for its own poll tick.
+      queryClient.invalidateQueries({ queryKey: ["transcripts", meetingId] });
+      // The summary is generated right after the transcript, also before the
+      // job is marked completed — invalidate it too so the Summary tab
+      // refreshes immediately instead of waiting for its own poll tick.
+      queryClient.invalidateQueries({ queryKey: ["summaries", meetingId] });
     }
   }, [query.data, queryClient, meetingId]);
 
