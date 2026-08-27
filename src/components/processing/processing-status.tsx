@@ -38,6 +38,14 @@ function ProcessingStatus({
     );
   }
 
+  if (status === "cancelled") {
+    return (
+      <StatusBadge status="warning" className={className}>
+        Cancelled
+      </StatusBadge>
+    );
+  }
+
   return (
     <StatusBadge status="error" className={className}>
       Failed

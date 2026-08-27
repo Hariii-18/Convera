@@ -9,7 +9,8 @@ export type GuestRestrictedAction =
   | "delete-meeting"
   | "manage-meeting"
   | "live-meeting"
-  | "cloud-storage";
+  | "cloud-storage"
+  | "export-meeting";
 
 export const GUEST_UPGRADE_COPY: Record<GuestRestrictedAction, string> = {
   "save-meeting":
@@ -22,4 +23,5 @@ export const GUEST_UPGRADE_COPY: Record<GuestRestrictedAction, string> = {
   "live-meeting":
     "Create a free account to capture live meetings from your browser.",
   "cloud-storage": "Create a free account to store your meetings in the cloud.",
+  "export-meeting": "Create a free account to export your meetings.",
 };

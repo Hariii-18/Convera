@@ -31,6 +31,8 @@ type WorkspaceHeaderProps = React.ComponentProps<"div"> & {
   /** Total length in seconds. Omit or null while duration is unknown (e.g. still processing). */
   durationSeconds?: number | null;
   createdAt: string | Date;
+  /** IANA zone `createdAt` renders in (e.g. the user's timezone preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   /** Presentational only — the caller owns what exporting actually does. */
   onExport?: () => void;
   onRename?: () => void;
@@ -51,6 +53,7 @@ function WorkspaceHeader({
   status,
   durationSeconds,
   createdAt,
+  timeZone,
   onExport,
   onRename,
   onDuplicate,
@@ -118,7 +121,7 @@ function WorkspaceHeader({
         </span>
         <span className="inline-flex items-center gap-1.5">
           <CalendarDays className="size-3.5 shrink-0" aria-hidden="true" />
-          Created {formatDate(createdAt)}
+          Created {formatDate(createdAt, timeZone)}
         </span>
       </div>
     </div>

@@ -1,7 +1,10 @@
 import type { AxiosProgressEvent } from "axios";
 
 import { apiClient } from "@/lib/api-client";
-import type { UploadResponse } from "@/features/uploads/types";
+import type {
+  UploadPlaybackResponse,
+  UploadResponse,
+} from "@/features/uploads/types";
 
 type UploadFileOptions = {
   meetingId: string;
@@ -20,6 +23,13 @@ export const uploadsApi = {
     return data;
   },
 
+  async getPlaybackUrl(id: string): Promise<UploadPlaybackResponse> {
+    const { data } = await apiClient.get<UploadPlaybackResponse>(
+      `/uploads/${id}/playback`,
+    );
+    return data;
+  },
+
   async upload(
     file: File,
     options: UploadFileOptions,
@@ -35,6 +45,7 @@ export const uploadsApi = {
         headers: { "Content-Type": "multipart/form-data" },
         signal: options?.signal,
         onUploadProgress: options?.onUploadProgress,
+        timeout: 0, // large files can take longer than the default request timeout
       },
     );
     return data;

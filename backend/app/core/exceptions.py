@@ -1,6 +1,7 @@
 import logging
 
 from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -60,10 +61,15 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def validation_exception_handler(
         _: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        # A `ValueError` raised from inside a `@field_validator`/`@model_validator`
+        # ends up in `errors()[i]["ctx"]["error"]` as the exception object
+        # itself, not a string -- `jsonable_encoder` (the same helper
+        # FastAPI's own default handler uses) coerces that down to
+        # something `JSONResponse` can actually serialize.
         return _error_response(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             "Validation failed",
-            exc.errors(),
+            jsonable_encoder(exc.errors()),
         )
 
     @app.exception_handler(Exception)

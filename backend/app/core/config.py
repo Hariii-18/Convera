@@ -29,14 +29,52 @@ class Settings(BaseSettings):
     whisper_model_size: str = "base"
     whisper_device: str = "cpu"
     whisper_compute_type: str = "int8"
+    # Only used as a retry when `whisper_model_size` produces unusable output
+    # (empty or garbage/hallucinated — see `is_unusable_transcription`) —
+    # never the default. See `workers.processor.transcribe_with_fallback`.
+    whisper_fallback_model_size: str = "small"
 
-    # Selects the `AIProvider` implementation from `app.services.ai.factory`.
-    # Only "ollama" is implemented; "openai", "gemini", "claude" are reserved
-    # names for future providers.
+    # Selects the `DiarizationProvider` implementation from
+    # `app.services.diarization.factory`. "mfcc" is CPU-only and needs no
+    # extra model download -- see `mfcc_diarizer`'s module docstring for why
+    # it was chosen over a torch-based neural-embedding provider.
+    diarization_provider: str = "mfcc"
+
+    # Selects the `AIProvider` implementation from `app.services.ai.factory`
+    # for translation only (see `get_ai_provider`). Only "ollama" is
+    # implemented here; "openai", "gemini", "claude" are reserved names for
+    # future providers. Neither Summary nor Normalization uses this setting
+    # — see `summary_ai_provider` and `normalization_ai_provider` below.
     ai_provider: str = "ollama"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
     ollama_request_timeout_seconds: float = 120.0
+
+    # Selects the `AIProvider` implementation used specifically for Summary
+    # generation (see `app.services.ai.factory.get_summary_ai_provider`).
+    # Kept independent of `ai_provider` so Summary can run on a cloud
+    # provider (no local model resources, reliable in Codespaces) while
+    # translation keeps using whatever `ai_provider` selects.
+    summary_ai_provider: str = "openai"
+    openai_api_key: str = ""
+    openai_summary_model: str = "gpt-4.1"
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_request_timeout_seconds: float = 60.0
+
+    # Selects the `AIProvider` implementation used specifically for
+    # Normalization (see `app.services.ai.factory.get_normalization_ai_provider`).
+    # Kept independent of `ai_provider` for the same reason as
+    # `summary_ai_provider` above — normalization runs on a cloud provider by
+    # default instead of depending on a local Ollama server.
+    normalization_ai_provider: str = "openai"
+    openai_normalization_model: str = "gpt-4.1"
+
+    # Resend (https://resend.com) is used to email Meeting Notes exports —
+    # see `app.services.email.resend_provider`. `resend_from_email` must be a
+    # verified sender/domain in the Resend account.
+    resend_api_key: str = ""
+    resend_from_email: str = ""
+    resend_request_timeout_seconds: float = 30.0
 
     @property
     def cors_origin_list(self) -> list[str]:

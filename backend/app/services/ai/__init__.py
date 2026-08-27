@@ -8,7 +8,11 @@ from app.services.ai.base import (
     TranscriptChunk,
     TranslationResult,
 )
-from app.services.ai.factory import get_ai_provider
+from app.services.ai.factory import (
+    get_ai_provider,
+    get_normalization_ai_provider,
+    get_summary_ai_provider,
+)
 
 __all__ = [
     "ActionItem",
@@ -20,4 +24,6 @@ __all__ = [
     "TranscriptChunk",
     "TranslationResult",
     "get_ai_provider",
+    "get_normalization_ai_provider",
+    "get_summary_ai_provider",
 ]

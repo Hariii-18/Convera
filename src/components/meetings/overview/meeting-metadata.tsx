@@ -13,6 +13,8 @@ import type { MeetingMetadataData } from "@/components/meetings/overview/types";
 type MeetingMetadataProps = React.ComponentProps<"div"> & {
   data?: MeetingMetadataData;
   loading?: boolean;
+  /** IANA zone the timestamps render in (e.g. the user's timezone preference). Defaults to the browser's local zone. */
+  timeZone?: string;
 };
 
 /**
@@ -23,6 +25,7 @@ function MeetingMetadata({
   className,
   data,
   loading = false,
+  timeZone,
   ...props
 }: MeetingMetadataProps) {
   return (
@@ -64,17 +67,17 @@ function MeetingMetadata({
             <MetaRow label="Created">
               <time
                 dateTime={new Date(data.createdAt).toISOString()}
-                title={formatDateTime(data.createdAt)}
+                title={formatDateTime(data.createdAt, timeZone)}
               >
-                {formatDate(data.createdAt)}
+                {formatDate(data.createdAt, timeZone)}
               </time>
             </MetaRow>
             <MetaRow label="Last updated">
               <time
                 dateTime={new Date(data.updatedAt).toISOString()}
-                title={formatDateTime(data.updatedAt)}
+                title={formatDateTime(data.updatedAt, timeZone)}
               >
-                {formatDate(data.updatedAt)}
+                {formatDate(data.updatedAt, timeZone)}
               </time>
             </MetaRow>
           </dl>

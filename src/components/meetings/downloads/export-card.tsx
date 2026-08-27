@@ -83,7 +83,7 @@ function ExportCard({
             )}
           </dl>
         ) : (
-          <p className="text-xs text-muted-foreground">Not generated yet.</p>
+          <p className="text-xs text-muted-foreground">Rendered fresh on download.</p>
         )}
       </CardContent>
 
@@ -92,7 +92,7 @@ function ExportCard({
           className="w-full"
           onClick={onDownload}
           loading={downloading}
-          disabled={!onDownload || loading || !hasGenerated}
+          disabled={!onDownload || loading}
         />
       </CardFooter>
     </Card>

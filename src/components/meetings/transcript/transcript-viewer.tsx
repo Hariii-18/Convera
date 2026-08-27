@@ -9,7 +9,9 @@ import { TranscriptBlock } from "@/components/meetings/transcript/transcript-blo
 import { TranscriptToolbar } from "@/components/meetings/transcript/transcript-toolbar";
 import { TranscriptSkeleton } from "@/components/meetings/transcript/transcript-skeleton";
 import { countWords } from "@/components/meetings/format";
+import { findActiveTimestampId } from "@/features/media-player/active-item";
 import type { TranscriptBlockData } from "@/components/meetings/transcript/types";
+import type { TranslationLanguage } from "@/features/transcripts/types";
 
 type TranscriptViewerProps = React.ComponentProps<"div"> & {
   blocks?: TranscriptBlockData[];
@@ -21,12 +23,33 @@ type TranscriptViewerProps = React.ComponentProps<"div"> & {
   onEditModeChange?: (editMode: boolean) => void;
   /** Controlled — the caller owns the transcript data and applies the edit. */
   onBlockTextChange?: (blockId: string, text: string) => void;
+  /** Persists the current edits. Omit to fall back to a plain on/off edit
+   * toggle with no Save/Cancel step. */
+  onSave?: () => void;
+  saving?: boolean;
   onTimestampClick?: (seconds: number) => void;
   onCopy?: () => void;
+  /** Current playback position, while playing — highlights the block at or
+   * before this time. Omit (or leave undefined while paused) to show no
+   * highlight. */
+  activeTimeSeconds?: number;
   emptyTitle?: string;
   emptyDescription?: string;
   emptyAction?: React.ReactNode;
   skeletonCount?: number;
+  /** Which transcript variant is currently shown. Omit to hide the raw/normalized/translated toggle. */
+  view?: "raw" | "normalized" | "translated";
+  onViewChange?: (view: "raw" | "normalized" | "translated") => void;
+  /** Whether a normalized transcript has been generated for this meeting yet. */
+  hasNormalized?: boolean;
+  isNormalizing?: boolean;
+  onGenerateNormalized?: () => void;
+  /** Whether a translation into `translationLanguage` has been generated yet. */
+  hasTranslated?: boolean;
+  isTranslating?: boolean;
+  translationLanguage?: TranslationLanguage;
+  onTranslationLanguageChange?: (language: TranslationLanguage) => void;
+  onGenerateTranslation?: () => void;
 };
 
 /**
@@ -48,12 +71,25 @@ function TranscriptViewer({
   editMode = false,
   onEditModeChange,
   onBlockTextChange,
+  onSave,
+  saving = false,
   onTimestampClick,
   onCopy,
+  activeTimeSeconds,
   emptyTitle = "No transcript yet",
   emptyDescription = "Once this meeting is transcribed, the full transcript will appear here.",
   emptyAction,
   skeletonCount = 6,
+  view,
+  onViewChange,
+  hasNormalized = false,
+  isNormalizing = false,
+  onGenerateNormalized,
+  hasTranslated = false,
+  isTranslating = false,
+  translationLanguage,
+  onTranslationLanguageChange,
+  onGenerateTranslation,
   ...props
 }: TranscriptViewerProps) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -72,6 +108,14 @@ function TranscriptViewer({
   const wordCount = React.useMemo(
     () => countWords(blocks.map((block) => block.text).join(" ")),
     [blocks],
+  );
+
+  const activeBlockId = React.useMemo(
+    () =>
+      activeTimeSeconds === undefined
+        ? undefined
+        : findActiveTimestampId(blocks, activeTimeSeconds),
+    [blocks, activeTimeSeconds],
   );
 
   React.useEffect(() => {
@@ -101,9 +145,21 @@ function TranscriptViewer({
         onSearchChange={onSearchChange}
         editMode={editMode}
         onEditModeChange={onEditModeChange}
+        onSave={onSave}
+        saving={saving}
         wordCount={blocks.length > 0 ? wordCount : undefined}
         transcriptText={transcriptText}
         onCopy={onCopy}
+        view={view}
+        onViewChange={onViewChange}
+        hasNormalized={hasNormalized}
+        isNormalizing={isNormalizing}
+        onGenerateNormalized={onGenerateNormalized}
+        hasTranslated={hasTranslated}
+        isTranslating={isTranslating}
+        translationLanguage={translationLanguage}
+        onTranslationLanguageChange={onTranslationLanguageChange}
+        onGenerateTranslation={onGenerateTranslation}
         className="border-b border-border"
       />
 
@@ -136,6 +192,7 @@ function TranscriptViewer({
                 searchTerm={searchValue}
                 editable={editMode}
                 onTimestampClick={onTimestampClick}
+                isActive={block.id === activeBlockId}
                 onTextChange={
                   onBlockTextChange
                     ? (text) => onBlockTextChange(block.id, text)

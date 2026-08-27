@@ -13,7 +13,8 @@ export type ProcessingStage =
   | "summarizing"
   | "finalizing"
   | "completed"
-  | "failed";
+  | "failed"
+  | "cancelled";
 
 export type ProcessingQueueItem = {
   id: string;

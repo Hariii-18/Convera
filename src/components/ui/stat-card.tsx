@@ -100,7 +100,10 @@ function StatCard({
           {loading ? (
             <Skeleton className="h-8 w-20" />
           ) : (
-            <p className="font-heading text-2xl font-semibold tracking-tight text-foreground tabular-nums @sm:text-3xl">
+            <p
+              className="truncate font-heading text-2xl font-semibold tracking-tight text-foreground tabular-nums @sm:text-3xl"
+              title={typeof value === "string" ? value : undefined}
+            >
               {value ?? "—"}
             </p>
           )}

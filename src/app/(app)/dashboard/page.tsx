@@ -46,10 +46,11 @@ import { useCreateMeeting } from "@/features/meetings/hooks/use-create-meeting";
 import { useDeleteMeeting } from "@/features/meetings/hooks/use-delete-meeting";
 import { useUpdateMeeting } from "@/features/meetings/hooks/use-update-meeting";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
-import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
+import { useUploadTarget } from "@/features/meetings/hooks/use-upload-target";
 import { useDashboardStats } from "@/features/dashboard/hooks/use-dashboard-stats";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
 import { isTerminalStatus } from "@/features/processing/mappers";
+import { useDownloadTranscript } from "@/features/transcripts/hooks/use-download-transcript";
 import { RenameMeetingDialog } from "@/components/meetings/rename-meeting-dialog";
 import { DeleteMeetingDialog } from "@/components/meetings/delete-meeting-dialog";
 import { GuestUpgradeDialog } from "@/components/guest/guest-upgrade-dialog";
@@ -87,9 +88,8 @@ export default function DashboardPage() {
   } = useDashboardStats({ enabled: isReady && !isGuest });
   const createMeeting = useCreateMeeting();
   const deleteMeeting = useDeleteMeeting();
-  const downloadTranscript = useDownloadTranscript();
   const [newMeetingOpen, setNewMeetingOpen] = useState(false);
-  const [uploadTarget, setUploadTarget] = useState<Meeting | null>(null);
+  const uploadTarget = useUploadTarget();
   const [renameTarget, setRenameTarget] = useState<Meeting | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Meeting | null>(null);
   const updateMeeting = useUpdateMeeting(renameTarget?.id ?? "");
@@ -97,6 +97,7 @@ export default function DashboardPage() {
   const { data: processingJobs, isLoading: isProcessingLoading } = useProcessing({
     enabled: isReady && !isGuest,
   });
+  const downloadTranscript = useDownloadTranscript();
 
   const statsUnavailable = isStatsError || isGuest;
   const dashboardStats: StatItem[] = [
@@ -179,12 +180,17 @@ export default function DashboardPage() {
         });
       }
       if (job.completedAt) {
-        const failed = job.status === "failed";
+        // Cancelled jobs also carry a `completedAt` (see `mark_job_cancelled`)
+        // but are neither a success nor a failure — bucket them with
+        // "processing-failed" (closest existing activity type/icon) rather
+        // than mislabeling a user-initiated cancellation as "Finished".
+        const completed = job.status === "completed";
+        const cancelled = job.status === "cancelled";
         items.push({
-          id: `${job.id}-${failed ? "failed" : "completed"}`,
-          type: failed ? "processing-failed" : "processing-completed",
+          id: `${job.id}-${completed ? "completed" : cancelled ? "cancelled" : "failed"}`,
+          type: completed ? "processing-completed" : "processing-failed",
           timestamp: job.completedAt,
-          description: `${failed ? "Failed" : "Finished"} processing "${title}"`,
+          description: `${completed ? "Finished" : cancelled ? "Cancelled" : "Failed"} processing "${title}"`,
         });
       }
     }
@@ -220,7 +226,7 @@ export default function DashboardPage() {
         onSuccess: (meeting) => {
           setNewMeetingOpen(false);
           if (data.source === "upload-recording") {
-            setUploadTarget(toMeeting(meeting));
+            uploadTarget.startForNewMeeting(toMeeting(meeting));
             return;
           }
           router.push(getPostCreateRoute(data.source, meeting.id));
@@ -318,16 +324,22 @@ export default function DashboardPage() {
             onRenameMeeting={(meeting) =>
               guard("rename-meeting", () => setRenameTarget(meeting))
             }
-            onDownloadMeeting={(meeting) =>
+            onDownloadMeeting={(meeting) => {
+              if (downloadTranscript.isPending) return;
               downloadTranscript.mutate(
-                { meetingId: meeting.id, format: "txt", fileName: `${meeting.title}.txt` },
                 {
-                  onSuccess: () => toast.success(`Downloaded "${meeting.title}.txt"`),
+                  meetingId: meeting.id,
+                  format: "txt",
+                  fileName: `${meeting.title}.txt`,
+                },
+                {
+                  onSuccess: () =>
+                    toast.success(`Downloaded "${meeting.title}"`),
                   onError: (mutationError) =>
                     toast.error(extractErrorMessage(mutationError)),
                 },
-              )
-            }
+              );
+            }}
             onDeleteMeeting={(meeting) =>
               guard("delete-meeting", () => setDeleteTarget(meeting))
             }
@@ -352,12 +364,13 @@ export default function DashboardPage() {
         onContinue={handleContinue}
       />
 
-      {uploadTarget && (
+      {uploadTarget.meeting && (
         <UploadDialog
-          open={Boolean(uploadTarget)}
-          onOpenChange={(open) => !open && setUploadTarget(null)}
-          meetingId={uploadTarget.id}
-          meetingTitle={uploadTarget.title}
+          open={Boolean(uploadTarget.meeting)}
+          onOpenChange={(open) => !open && uploadTarget.close()}
+          meetingId={uploadTarget.meeting.id}
+          meetingTitle={uploadTarget.meeting.title}
+          onUploaded={uploadTarget.markUploaded}
         />
       )}
 

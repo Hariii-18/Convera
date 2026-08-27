@@ -13,10 +13,29 @@ export type SummaryTextItemResponse = {
   text: string;
 };
 
+/** Mirrors `app.schemas.summary.ActionItemStatus` — explicit allowed values
+ * only, never inferred. */
+export type SummaryActionItemStatusResponse =
+  | "not-started"
+  | "in-progress"
+  | "completed"
+  | "blocked";
+
 export type SummaryActionItemResponse = {
   text: string;
   owner: string | null;
   due_date: string | null;
+  status: SummaryActionItemStatusResponse | null;
+};
+
+/** Body for `PATCH /summaries/action-items/{index}`. Every field is
+ * optional — only the ones supplied are changed (mirrors
+ * `MeetingNotesActionItemInput`'s partial-update contract on the backend). */
+export type SummaryActionItemUpdateRequest = {
+  text?: string;
+  owner?: string | null;
+  due_date?: string | null;
+  status?: SummaryActionItemStatusResponse | null;
 };
 
 export type SummaryResponse = {
@@ -31,4 +50,22 @@ export type SummaryResponse = {
   next_steps: SummaryTextItemResponse[];
   created_at: string;
   updated_at: string;
+};
+
+/** Mirrors `MeetingNotesExportFormat`/`ConversationExportFormat` — same
+ * three renderers, applied to just the Summary tab's content. */
+export type SummaryExportFormat = "pdf" | "docx" | "pptx";
+
+/** Body for `POST /summaries/{meeting_id}/email`. `send_to_me` and
+ * `recipients` are merged and deduplicated server-side into the final send
+ * list — see `backend/app/services/summary_email_service.py`. */
+export type SummaryEmailRequest = {
+  format: SummaryExportFormat;
+  send_to_me: boolean;
+  recipients: string[];
+};
+
+export type SummaryEmailResponse = {
+  sent: boolean;
+  recipients: string[];
 };

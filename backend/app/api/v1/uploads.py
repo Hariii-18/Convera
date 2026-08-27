@@ -14,15 +14,15 @@ from app.crud.upload import (
     list_uploads,
     mark_upload_completed,
     mark_upload_failed,
-    soft_delete_upload,
     upload_exists_with_filename,
 )
 from app.db.session import get_db
 from app.models.upload import Upload
 from app.models.user import User
-from app.schemas.upload import UploadRead
+from app.schemas.upload import UploadPlaybackRead, UploadRead
 from app.services.processing_service import queue_processing_job
-from app.services.storage_service import StorageError, delete_file, upload_file
+from app.services.storage_service import StorageError, create_signed_url, upload_file
+from app.services.upload_service import delete_upload_cascade
 from app.services.upload_validation import (
     build_storage_path,
     build_stored_filename,
@@ -34,6 +34,11 @@ from app.workers.processing_worker import run_processing_job
 logger = logging.getLogger("converra")
 
 router = APIRouter(prefix="/uploads", tags=["uploads"])
+
+# How long a playback URL stays valid for. Short-lived enough that a leaked
+# URL (browser history, a proxy log) isn't a standing hole, long enough that
+# a normal workspace session doesn't need to refetch mid-playback.
+PLAYBACK_URL_EXPIRES_IN = 3600
 
 
 def _get_owned_upload(db: Session, upload_id: uuid.UUID, current_user: User) -> Upload:
@@ -139,6 +144,33 @@ def get(
     return _get_owned_upload(db, upload_id, current_user)
 
 
+@router.get("/{upload_id}/playback", response_model=UploadPlaybackRead)
+def get_playback_url(
+    upload_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> UploadPlaybackRead:
+    upload = _get_owned_upload(db, upload_id, current_user)
+    if upload.status != "uploaded":
+        raise AppError("Recording is not available", status.HTTP_404_NOT_FOUND)
+
+    try:
+        url = create_signed_url(
+            upload.storage_path,
+            expires_in=PLAYBACK_URL_EXPIRES_IN,
+            bucket=upload.bucket,
+        )
+    except StorageError as exc:
+        logger.exception("Failed to create playback URL", exc_info=exc)
+        raise AppError(
+            "Failed to generate playback URL", status.HTTP_502_BAD_GATEWAY
+        ) from exc
+
+    return UploadPlaybackRead(
+        url=url, mime_type=upload.mime_type, expires_in=PLAYBACK_URL_EXPIRES_IN
+    )
+
+
 @router.delete("/{upload_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete(
     upload_id: uuid.UUID,
@@ -146,10 +178,4 @@ def delete(
     current_user: User = Depends(get_current_user),
 ) -> None:
     upload = _get_owned_upload(db, upload_id, current_user)
-
-    try:
-        delete_file(upload.storage_path, bucket=upload.bucket)
-    except StorageError as exc:
-        logger.exception("Failed to delete storage object during upload deletion", exc_info=exc)
-
-    soft_delete_upload(db, upload)
+    delete_upload_cascade(db, upload)

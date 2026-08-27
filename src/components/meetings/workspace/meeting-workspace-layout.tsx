@@ -21,6 +21,12 @@ type MeetingWorkspaceLayoutProps = React.ComponentProps<"div"> & {
   children: React.ReactNode;
   /** Sticky right rail, desktop only. Renders a placeholder when omitted. */
   sidePanel?: React.ReactNode;
+  /**
+   * Persistent playback surface (e.g. `MeetingMediaPlayer`), shown below the
+   * tab navigation and above every tab's content so it stays mounted and
+   * visible across tab switches. Renders nothing when omitted.
+   */
+  mediaPlayer?: React.ReactNode;
 };
 
 /**
@@ -34,6 +40,7 @@ function MeetingWorkspaceLayout({
   navigation,
   activeTab,
   sidePanel,
+  mediaPlayer,
   children,
   ...props
 }: MeetingWorkspaceLayoutProps) {
@@ -50,6 +57,14 @@ function MeetingWorkspaceLayout({
       </div>
 
       {navigation}
+
+      {mediaPlayer && (
+        <div className="w-full border-b border-border">
+          <PageContainer size="wide" className="py-4">
+            {mediaPlayer}
+          </PageContainer>
+        </div>
+      )}
 
       <PageContainer
         size="wide"

@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { TimelineItem } from "@/components/meetings/timeline/timeline-item";
 import { TimelineSkeleton } from "@/components/meetings/timeline/timeline-skeleton";
 import { TimelineToolbar } from "@/components/meetings/timeline/timeline-toolbar";
+import { findActiveTimestampId } from "@/features/media-player/active-item";
 import type { TimelineEventData } from "@/components/meetings/timeline/types";
 
 type TimelineViewerProps = React.ComponentProps<"div"> & {
@@ -19,6 +20,10 @@ type TimelineViewerProps = React.ComponentProps<"div"> & {
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
   onItemClick?: (event: TimelineEventData) => void;
+  /** Current playback position, while playing — highlights the event at or
+   * before this time. Omit (or leave undefined while paused) to show no
+   * highlight. */
+  activeTimeSeconds?: number;
   emptyTitle?: string;
   emptyDescription?: string;
   skeletonCount?: number;
@@ -38,11 +43,20 @@ function TimelineViewer({
   expanded,
   onExpandedChange,
   onItemClick,
+  activeTimeSeconds,
   emptyTitle = "No timeline yet",
   emptyDescription = "Key moments from this meeting will appear here.",
   skeletonCount = 5,
   ...props
 }: TimelineViewerProps) {
+  const activeEventId = React.useMemo(
+    () =>
+      activeTimeSeconds === undefined
+        ? undefined
+        : findActiveTimestampId(events, activeTimeSeconds),
+    [events, activeTimeSeconds],
+  );
+
   return (
     <div
       data-slot="timeline-viewer"
@@ -88,6 +102,7 @@ function TimelineViewer({
               isLast={index === events.length - 1}
               searchTerm={searchValue}
               onItemClick={onItemClick}
+              isActive={event.id === activeEventId}
             />
           ))}
         </ol>

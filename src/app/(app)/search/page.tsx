@@ -11,11 +11,13 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { SearchInput } from "@/components/ui/search-input";
 import { MeetingStatusBadge } from "@/components/meetings/meeting-status-badge";
 import { formatDate } from "@/components/meetings/format";
+import { useUserTimezone } from "@/features/auth/hooks/use-user-timezone";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { searchMeetings } from "@/features/meetings/search";
 
 export default function SearchPage() {
   const router = useRouter();
+  const timeZone = useUserTimezone();
   const { data: meetings } = useMeetings();
 
   const [query, setQuery] = useState("");
@@ -67,7 +69,7 @@ export default function SearchPage() {
                     </span>
                     <MeetingStatusBadge status={meeting.status} />
                     <span className="shrink-0 text-xs text-muted-foreground">
-                      {formatDate(meeting.createdAt)}
+                      {formatDate(meeting.createdAt, timeZone)}
                     </span>
                   </button>
                 </li>

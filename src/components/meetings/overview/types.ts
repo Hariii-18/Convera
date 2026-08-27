@@ -25,7 +25,9 @@ export type MeetingStatisticsData = {
   /** Seconds the pipeline took to finish processing. */
   processingTimeSeconds?: number;
   summaryStatus?: SummaryStatus;
-  recordingSizeBytes?: number;
+  /** `null` means no recording was ever persisted (e.g. a Live Meeting) —
+   * distinct from `undefined` (still loading/unknown). */
+  recordingSizeBytes?: number | null;
 };
 
 export type RecordingInfo = {

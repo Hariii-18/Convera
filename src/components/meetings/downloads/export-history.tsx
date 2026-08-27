@@ -22,26 +22,33 @@ import { cn } from "@/lib/utils";
 type ExportHistoryProps = React.ComponentProps<"div"> & {
   entries?: ExportHistoryEntry[];
   loading?: boolean;
+  /** IANA zone the "Available since" column renders in (e.g. the user's
+   * timezone preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   /** Presentational only — the caller owns what downloading actually does. */
   onDownload?: (entry: ExportHistoryEntry) => void;
 };
 
 /**
- * Log of previously generated exports: file name, format, generated date,
- * and a download action per row. Purely presentational — it never fetches or
- * regenerates a file, only renders whatever `entries` is passed.
+ * Formats currently available to download: file name, format, the date the
+ * underlying meeting was last updated, and a download action per row. Every
+ * row is rendered fresh on download, not read from a stored export archive —
+ * this is a list of what's downloadable now, not a log of past downloads.
+ * Purely presentational — it never fetches a file itself, only renders
+ * whatever `entries` is passed.
  */
 function ExportHistory({
   className,
   entries,
   loading = false,
+  timeZone,
   onDownload,
   ...props
 }: ExportHistoryProps) {
   return (
     <Card data-slot="export-history" className={cn(className)} {...props}>
       <CardHeader>
-        <CardTitle as="h3">Export history</CardTitle>
+        <CardTitle as="h3">Available downloads</CardTitle>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -58,16 +65,16 @@ function ExportHistory({
         ) : !entries || entries.length === 0 ? (
           <EmptyState
             icon={<History />}
-            title="No exports yet"
-            description="Files you generate will show up here with their format and generation date."
+            title="No downloads yet"
+            description="Formats you can export will show up here once a meeting finishes processing."
           />
         ) : (
-          <Table aria-label="Export history">
+          <Table aria-label="Available downloads">
             <TableHeader>
               <TableRow>
                 <TableHead>File name</TableHead>
                 <TableHead>Format</TableHead>
-                <TableHead>Generated</TableHead>
+                <TableHead>Meeting updated</TableHead>
                 <TableHead className="text-right">Download</TableHead>
               </TableRow>
             </TableHeader>
@@ -83,7 +90,7 @@ function ExportHistory({
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">
-                    {formatDate(entry.generatedAt)}
+                    {formatDate(entry.generatedAt, timeZone)}
                   </TableCell>
                   <TableCell className="text-right">
                     <DownloadButton

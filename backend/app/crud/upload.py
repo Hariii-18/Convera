@@ -1,5 +1,4 @@
 import uuid
-from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -65,6 +64,14 @@ def get_upload(db: Session, upload_id: uuid.UUID, user_id: int) -> Upload | None
     )
 
 
+def list_uploads_by_meeting_id(db: Session, meeting_id: uuid.UUID) -> list[Upload]:
+    return (
+        db.query(Upload)
+        .filter(Upload.meeting_id == meeting_id, Upload.deleted_at.is_(None))
+        .all()
+    )
+
+
 def upload_exists_with_filename(db: Session, user_id: int, original_filename: str) -> bool:
     return (
         db.query(Upload.id)
@@ -92,7 +99,10 @@ def mark_upload_failed(db: Session, upload: Upload) -> Upload:
     return upload
 
 
-def soft_delete_upload(db: Session, upload: Upload) -> None:
-    upload.status = "deleted"
-    upload.deleted_at = datetime.now(timezone.utc)
-    db.commit()
+def get_total_upload_size_bytes(db: Session, user_id: int) -> int:
+    total = (
+        db.query(func.coalesce(func.sum(Upload.size_bytes), 0))
+        .filter(Upload.user_id == user_id, Upload.deleted_at.is_(None))
+        .scalar()
+    )
+    return int(total)

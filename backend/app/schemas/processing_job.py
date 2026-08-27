@@ -4,7 +4,9 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-ProcessingStatus = Literal["queued", "preparing", "processing", "completed", "failed"]
+ProcessingStatus = Literal[
+    "queued", "preparing", "processing", "completed", "failed", "cancelled"
+]
 
 
 class ProcessingJobCreate(BaseModel):

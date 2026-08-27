@@ -13,6 +13,8 @@ import { Risks } from "@/components/meetings/summary/risks";
 import { SummaryToolbar } from "@/components/meetings/summary/summary-toolbar";
 import { countWords } from "@/components/meetings/format";
 import { buildSummaryText } from "@/components/meetings/summary/format";
+import type { ActionItemEdits } from "@/components/meetings/summary/edit-action-item-dialog";
+import type { MeetingNotesEmailSendPayload } from "@/components/meetings/notes/meeting-notes-email-dialog";
 import type {
   ActionItemData,
   DecisionData,
@@ -21,6 +23,7 @@ import type {
   OpenQuestionData,
   RiskData,
 } from "@/components/meetings/summary/types";
+import type { SummaryExportFormat } from "@/features/summaries/types";
 
 type SummaryViewerProps = React.ComponentProps<"div"> & {
   executiveSummary?: string;
@@ -32,12 +35,34 @@ type SummaryViewerProps = React.ComponentProps<"div"> & {
   nextSteps?: NextStepData[];
   /** Renders every section's skeleton state. */
   loading?: boolean;
+  /** IANA zone action item due dates render in (e.g. the user's timezone
+   * preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   onToggleActionItem?: (id: string) => void;
+  /** Persists a text/owner/due date/status edit made through the action
+   * item edit dialog. Omit to hide the edit affordance. */
+  onSaveActionItem?: (id: string, edits: ActionItemEdits) => void;
+  /** Id of the action item currently being saved, if any. */
+  pendingActionItemId?: string | null;
   onCopy?: () => void;
-  /** Presentational placeholder — the caller owns what exporting actually does. */
-  onExport?: () => void;
+  /** Renders the currently saved summary to a format and saves it to disk.
+   * Omit to disable the Export control entirely. */
+  onExport?: (format: SummaryExportFormat) => void;
+  /** Shows a spinner on the Export control while a download is in flight. */
+  exporting?: boolean;
   /** Presentational placeholder — the caller owns what regenerating actually does. */
   onRegenerate?: () => void;
+  /** Format the "Send to Email" dialog will render and attach. */
+  emailFormat?: SummaryExportFormat;
+  onEmailFormatChange?: (format: SummaryExportFormat) => void;
+  /** Authenticated user's own address, shown in the email dialog's "Send to
+   * me" option. */
+  ownEmail?: string;
+  /** Emails the currently saved Summary (rendered to `emailFormat`) to the
+   * resolved recipient list. Omit to hide the Send to Email control
+   * entirely. */
+  onSendEmail?: (payload: MeetingNotesEmailSendPayload) => Promise<void>;
+  sendingEmail?: boolean;
 };
 
 /**
@@ -56,10 +81,19 @@ function SummaryViewer({
   openQuestions,
   nextSteps,
   loading = false,
+  timeZone,
   onToggleActionItem,
+  onSaveActionItem,
+  pendingActionItemId,
   onCopy,
   onExport,
+  exporting = false,
   onRegenerate,
+  emailFormat,
+  onEmailFormatChange,
+  ownEmail,
+  onSendEmail,
+  sendingEmail = false,
   ...props
 }: SummaryViewerProps) {
   const summaryText = React.useMemo(
@@ -97,7 +131,13 @@ function SummaryViewer({
         wordCount={wordCount > 0 ? wordCount : undefined}
         onCopy={onCopy}
         onExport={onExport}
+        exporting={exporting}
         onRegenerate={onRegenerate}
+        emailFormat={emailFormat}
+        onEmailFormatChange={onEmailFormatChange}
+        ownEmail={ownEmail}
+        onSendEmail={onSendEmail}
+        sendingEmail={sendingEmail}
       />
 
       <ExecutiveSummary summary={executiveSummary} loading={loading} />
@@ -106,7 +146,10 @@ function SummaryViewer({
       <ActionItems
         items={actionItems}
         loading={loading}
+        timeZone={timeZone}
         onToggleActionItem={onToggleActionItem}
+        onSaveActionItem={onSaveActionItem}
+        pendingItemId={pendingActionItemId}
       />
       <Risks risks={risks} loading={loading} />
       <OpenQuestions questions={openQuestions} loading={loading} />

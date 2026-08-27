@@ -39,7 +39,12 @@ export function toProcessingJob(response: ProcessingJobResponse): ProcessingJob 
 
 /** A job is done driving UI state once it reaches a terminal status. */
 export function isTerminalStatus(status: ProcessingJobStatus): boolean {
-  return status === "completed" || status === "failed";
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+/** A cancelled job can be retried the same way a failed one can. */
+export function isRetryableStatus(status: ProcessingJobStatus): boolean {
+  return status === "failed" || status === "cancelled";
 }
 
 export type ProcessingTransitionToast = {
@@ -65,6 +70,9 @@ export function getTransitionToast(
   }
   if (currentStatus === "failed") {
     return { variant: "error", message: "Processing failed" };
+  }
+  if (currentStatus === "cancelled") {
+    return { variant: "message", message: "Processing cancelled" };
   }
   if (
     previousStatus === "queued" &&

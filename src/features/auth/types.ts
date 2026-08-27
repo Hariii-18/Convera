@@ -3,6 +3,7 @@ export type User = {
   email: string;
   full_name: string;
   is_active: boolean;
+  timezone: string;
   created_at: string;
 };
 

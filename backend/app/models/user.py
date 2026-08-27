@@ -14,6 +14,11 @@ class User(Base):
     full_name: Mapped[str] = mapped_column(String(255), nullable=False)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # IANA timezone name, used only to render meeting/date timestamps in the
+    # UI in the user's local time -- every stored timestamp stays UTC.
+    timezone: Mapped[str] = mapped_column(
+        String(64), default="Asia/Kolkata", server_default="Asia/Kolkata", nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

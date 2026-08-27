@@ -5,17 +5,17 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.exceptions import AppError
-from app.crud.processing_job import (
-    delete_processing_job,
-    get_processing_job,
-    list_processing_jobs,
-)
+from app.crud.processing_job import get_processing_job, list_processing_jobs
 from app.crud.upload import get_upload
 from app.db.session import get_db
 from app.models.processing_job import ProcessingJob
 from app.models.user import User
 from app.schemas.processing_job import ProcessingJobCreate, ProcessingJobRead
-from app.services.processing_service import queue_processing_job, retry_processing_job
+from app.services.processing_service import (
+    cancel_processing_job,
+    queue_processing_job,
+    retry_processing_job,
+)
 from app.workers.processing_worker import run_processing_job
 
 router = APIRouter(prefix="/process", tags=["processing"])
@@ -76,10 +76,15 @@ def retry(
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete(
+def cancel(
     job_id: uuid.UUID,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
+    """Cancels a queued/preparing/processing job: stops its worker (see
+    `cancel_processing_job`) and flips it to the terminal "cancelled" status.
+    Does not delete the row -- kept as `DELETE` for API-contract stability
+    with existing clients, but this is a cancel, not a destructive delete.
+    """
     job = _get_owned_job(db, job_id, current_user)
-    delete_processing_job(db, job)
+    cancel_processing_job(db, job)

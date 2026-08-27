@@ -13,6 +13,8 @@ type TranscriptBlockProps = React.ComponentProps<"div"> & {
   /** Renders the text as an editable, auto-growing textarea. Controlled by the caller. */
   editable?: boolean;
   onTextChange?: (text: string) => void;
+  /** Highlights this block as the one currently playing. */
+  isActive?: boolean;
 };
 
 /**
@@ -27,6 +29,7 @@ function TranscriptBlock({
   onTimestampClick,
   editable = false,
   onTextChange,
+  isActive = false,
   ...props
 }: TranscriptBlockProps) {
   const segments = splitHighlight(block.text, searchTerm);
@@ -34,7 +37,11 @@ function TranscriptBlock({
   return (
     <div
       data-slot="transcript-block"
-      className={cn("flex gap-3 px-4 py-3", className)}
+      className={cn(
+        "flex gap-3 px-4 py-3 transition-colors",
+        isActive && "bg-primary/5",
+        className,
+      )}
       {...props}
     >
       <Timestamp

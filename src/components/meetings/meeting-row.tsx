@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import { ChevronRight, Video } from "lucide-react";
 
@@ -12,6 +14,7 @@ import {
   formatRelativeTime,
 } from "@/components/meetings/format";
 import type { Meeting } from "@/components/meetings/types";
+import { useUserTimezone } from "@/features/auth/hooks/use-user-timezone";
 
 type MeetingRowProps = {
   meeting: Meeting;
@@ -28,11 +31,12 @@ const MeetingRow = React.forwardRef<HTMLTableRowElement, MeetingRowProps>(
     { meeting, tabIndex, onView, onRename, onDownload, onDelete, onKeyDown },
     ref,
   ) {
+    const timeZone = useUserTimezone();
     const accessibleLabel = `${meeting.title}, ${meetingStatusConfig[meeting.status].label}, duration ${formatDuration(meeting.durationSeconds)}${
       meeting.participantCount !== undefined
         ? `, ${meeting.participantCount} ${meeting.participantCount === 1 ? "participant" : "participants"}`
         : ""
-    }, created ${formatDate(meeting.createdAt)}, updated ${formatRelativeTime(meeting.updatedAt)}`;
+    }, created ${formatDate(meeting.createdAt, timeZone)}, updated ${formatRelativeTime(meeting.updatedAt)}`;
 
     return (
       <TableRow
@@ -81,12 +85,12 @@ const MeetingRow = React.forwardRef<HTMLTableRowElement, MeetingRowProps>(
         </TableCell>
 
         <TableCell className="w-px whitespace-nowrap text-muted-foreground">
-          {formatDate(meeting.createdAt)}
+          {formatDate(meeting.createdAt, timeZone)}
         </TableCell>
 
         <TableCell
           className="w-px whitespace-nowrap text-muted-foreground"
-          title={formatDateTime(meeting.updatedAt)}
+          title={formatDateTime(meeting.updatedAt, timeZone)}
         >
           {formatRelativeTime(meeting.updatedAt)}
         </TableCell>

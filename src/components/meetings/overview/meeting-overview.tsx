@@ -19,6 +19,8 @@ import type { ProcessingJob } from "@/features/processing/mappers";
 
 type MeetingOverviewProps = React.ComponentProps<"div"> & {
   metadata?: MeetingMetadataData;
+  /** IANA zone metadata timestamps render in (e.g. the user's timezone preference). Defaults to the browser's local zone. */
+  timeZone?: string;
   statistics?: MeetingStatisticsData;
   recording?: RecordingInfo;
   /** Full summary text — only the first few lines are shown here. */
@@ -34,6 +36,9 @@ type MeetingOverviewProps = React.ComponentProps<"div"> & {
   onViewTimeline?: () => void;
   /** Presentational only — the caller owns what downloading actually does. */
   onDownloadRecording?: () => void;
+  /** Presentational only — the caller owns what retrying processing actually does. */
+  onRetryProcessing?: () => void;
+  isRetryingProcessing?: boolean;
 };
 
 /**
@@ -45,6 +50,7 @@ type MeetingOverviewProps = React.ComponentProps<"div"> & {
 function MeetingOverview({
   className,
   metadata,
+  timeZone,
   statistics,
   recording,
   summary,
@@ -56,6 +62,8 @@ function MeetingOverview({
   onViewFullSummary,
   onViewTimeline,
   onDownloadRecording,
+  onRetryProcessing,
+  isRetryingProcessing = false,
   ...props
 }: MeetingOverviewProps) {
   return (
@@ -79,10 +87,13 @@ function MeetingOverview({
       </div>
 
       <div className="flex flex-col gap-6">
-        <MeetingMetadata data={metadata} loading={loading} />
+        <MeetingMetadata data={metadata} loading={loading} timeZone={timeZone} />
         <ProcessingStatusCard
           job={processingJob}
           loading={loading || processingJobLoading}
+          meetingStatus={metadata?.status}
+          onRetry={onRetryProcessing}
+          isRetrying={isRetryingProcessing}
         />
         <RecordingCard
           recording={recording}

@@ -9,13 +9,17 @@ from app.crud.meeting import (
     create_meeting,
     get_meeting,
     list_meetings,
-    soft_delete_meeting,
     update_meeting,
 )
+from app.crud.summary import get_summary_by_meeting_id
 from app.db.session import get_db
 from app.models.meeting import Meeting
 from app.models.user import User
+from app.schemas.insights import MeetingInsightsRead
 from app.schemas.meeting import MeetingCreate, MeetingRead, MeetingUpdate
+from app.schemas.summary import TimelineEventRead, TimelineRead
+from app.services.insights_service import get_meeting_insights
+from app.services.meeting_service import delete_meeting_cascade
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -53,6 +57,48 @@ def get(
     return _get_owned_meeting(db, meeting_id, current_user)
 
 
+@router.get("/{meeting_id}/timeline", response_model=TimelineRead)
+def get_timeline(
+    meeting_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> TimelineRead:
+    """Returns the meeting's timeline events, ordered by `start`. Never 404s
+    on "no timeline yet" (unprocessed meeting, or a provider that produced no
+    events) — that's an honest empty list, not an error; only an unowned or
+    nonexistent meeting 404s.
+    """
+    _get_owned_meeting(db, meeting_id, current_user)
+
+    summary = get_summary_by_meeting_id(db, meeting_id)
+    raw_events = summary.timeline_events if summary is not None else []
+    ordered_events = sorted(raw_events, key=lambda event: event["start"])
+    return TimelineRead(
+        meeting_id=meeting_id,
+        events=[
+            TimelineEventRead(start=event["start"], title=event["label"])
+            for event in ordered_events
+        ],
+    )
+
+
+@router.get("/{meeting_id}/insights", response_model=MeetingInsightsRead)
+def get_insights(
+    meeting_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> MeetingInsightsRead:
+    """Returns AI Insights derived from the meeting's Summary (unresolved
+    issues, decision uncertainty, risk signals, unanswered questions, and
+    follow-up gaps). Never 404s on "no summary yet" — that's an honest
+    `has_summary: false` with empty sections, not an error; only an
+    unowned or nonexistent meeting 404s. See `insights_service` for how
+    each section is derived — no new AI call is made here.
+    """
+    _get_owned_meeting(db, meeting_id, current_user)
+    return get_meeting_insights(db, meeting_id)
+
+
 @router.patch("/{meeting_id}", response_model=MeetingRead)
 def update(
     meeting_id: uuid.UUID,
@@ -71,4 +117,4 @@ def delete(
     current_user: User = Depends(get_current_user),
 ) -> None:
     meeting = _get_owned_meeting(db, meeting_id, current_user)
-    soft_delete_meeting(db, meeting)
+    delete_meeting_cascade(db, meeting)

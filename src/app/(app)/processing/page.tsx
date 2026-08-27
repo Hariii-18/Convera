@@ -11,11 +11,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ProcessingJobsTable } from "@/components/processing/processing-jobs-table";
+import { CancelProcessingDialog } from "@/components/processing/cancel-processing-dialog";
 import { extractErrorMessage } from "@/features/auth/error";
+import { useUserTimezone } from "@/features/auth/hooks/use-user-timezone";
 import { useGuestSession } from "@/features/guest/guest-provider";
 import { useMeetings } from "@/features/meetings/hooks/use-meetings";
 import { useProcessing } from "@/features/processing/hooks/use-processing";
 import { useRetryProcessing } from "@/features/processing/hooks/use-retry-processing";
+import { useCancelProcessing } from "@/features/processing/hooks/use-cancel-processing";
+import type { ProcessingJob } from "@/features/processing/mappers";
 
 const CLOCK_TICK_MS = 1000;
 
@@ -32,6 +36,7 @@ function useNow() {
 export default function ProcessingPage() {
   const router = useRouter();
   const { isGuest, isReady } = useGuestSession();
+  const timeZone = useUserTimezone();
   const now = useNow();
 
   const {
@@ -43,6 +48,8 @@ export default function ProcessingPage() {
   } = useProcessing({ enabled: isReady && !isGuest });
   const { data: meetings } = useMeetings({ enabled: isReady && !isGuest });
   const retryMutation = useRetryProcessing();
+  const cancelMutation = useCancelProcessing();
+  const [cancelTarget, setCancelTarget] = useState<ProcessingJob | null>(null);
 
   const meetingTitles = useMemo(() => {
     const map = new Map<string, string>();
@@ -52,6 +59,19 @@ export default function ProcessingPage() {
 
   function handleRetry(jobId: string) {
     retryMutation.mutate(jobId, {
+      onError: (mutationError) => {
+        toast.error(extractErrorMessage(mutationError));
+      },
+    });
+  }
+
+  function handleCancelConfirm() {
+    if (!cancelTarget) return;
+    cancelMutation.mutate(cancelTarget.id, {
+      onSuccess: () => {
+        toast.success("Processing cancelled");
+        setCancelTarget(null);
+      },
       onError: (mutationError) => {
         toast.error(extractErrorMessage(mutationError));
       },
@@ -108,15 +128,28 @@ export default function ProcessingPage() {
               isLoading={isLoading}
               meetingTitles={meetingTitles}
               now={now}
+              timeZone={timeZone}
               onRetry={(job) => handleRetry(job.id)}
               isRetrying={(job) =>
                 retryMutation.isPending && retryMutation.variables === job.id
+              }
+              onCancel={(job) => setCancelTarget(job)}
+              isCancelling={(job) =>
+                cancelMutation.isPending && cancelMutation.variables === job.id
               }
               onViewMeeting={(meetingId) => router.push(`/meetings/${meetingId}`)}
             />
           )}
         </CardContent>
       </Card>
+
+      <CancelProcessingDialog
+        job={cancelTarget}
+        meetingTitle={cancelTarget ? meetingTitles.get(cancelTarget.meetingId) : undefined}
+        onOpenChange={(open) => !open && setCancelTarget(null)}
+        onConfirm={handleCancelConfirm}
+        isPending={cancelMutation.isPending}
+      />
     </PageContainer>
   );
 }

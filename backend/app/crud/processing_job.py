@@ -3,8 +3,26 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.processing_job import ProcessingJob
+from app.models.processing_job import ACTIVE_STATUSES, ProcessingJob
 from app.schemas.processing_job import ProcessingStats
+
+
+def get_active_processing_job_for_upload(
+    db: Session, upload_id: uuid.UUID
+) -> ProcessingJob | None:
+    """Row-locks and returns the in-flight job for this upload, if any.
+
+    The `FOR UPDATE` lock serializes concurrent callers that find an existing
+    active row (e.g. two requests arriving back-to-back); the partial unique
+    index on `processing_jobs` is what closes the remaining race where two
+    callers both see no active row and attempt to insert one at the same time.
+    """
+    return (
+        db.query(ProcessingJob)
+        .filter(ProcessingJob.upload_id == upload_id, ProcessingJob.status.in_(ACTIVE_STATUSES))
+        .with_for_update()
+        .first()
+    )
 
 
 def create_processing_job(
@@ -47,6 +65,10 @@ def list_processing_jobs(
     return query.order_by(ProcessingJob.created_at.desc()).all()
 
 
+def list_processing_jobs_by_upload_id(db: Session, upload_id: uuid.UUID) -> list[ProcessingJob]:
+    return db.query(ProcessingJob).filter(ProcessingJob.upload_id == upload_id).all()
+
+
 def update_job_progress(
     db: Session,
     job: ProcessingJob,
@@ -77,23 +99,43 @@ def mark_job_started(db: Session, job: ProcessingJob, *, worker_name: str) -> Pr
     return job
 
 
-def mark_job_completed(db: Session, job: ProcessingJob) -> ProcessingJob:
+def mark_job_completed(db: Session, job: ProcessingJob, *, commit: bool = True) -> ProcessingJob:
     job.status = "completed"
     job.stage = "Completed"
     job.progress = 100
     job.completed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(job)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
     return job
 
 
-def mark_job_failed(db: Session, job: ProcessingJob, *, error_message: str) -> ProcessingJob:
+def mark_job_failed(
+    db: Session, job: ProcessingJob, *, error_message: str, commit: bool = True
+) -> ProcessingJob:
     job.status = "failed"
     job.stage = "Failed"
     job.error_message = error_message
     job.completed_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(job)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
+    return job
+
+
+def mark_job_cancelled(db: Session, job: ProcessingJob, *, commit: bool = True) -> ProcessingJob:
+    job.status = "cancelled"
+    job.stage = "Cancelled"
+    job.completed_at = datetime.now(timezone.utc)
+    if commit:
+        db.commit()
+        db.refresh(job)
+    else:
+        db.flush()
     return job
 
 

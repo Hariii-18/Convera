@@ -20,3 +20,9 @@ export type UploadResponse = {
   created_at: string;
   updated_at: string;
 };
+
+export type UploadPlaybackResponse = {
+  url: string;
+  mime_type: string;
+  expires_in: number;
+};
