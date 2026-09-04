@@ -51,7 +51,7 @@ function TimelineToolbar({
         </span>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2">
         <Button
           type="button"
           variant="outline"

@@ -23,20 +23,22 @@ know that model exists.
 """
 
 import logging
+import time
 import uuid
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import status
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import AppError
-from app.crud.summary import get_summary_by_meeting_id
+from app.crud.summary import get_summary_by_meeting_id, set_timeline_events
 from app.crud.transcript import get_transcript_by_meeting_id
 from app.models.summary import Summary
 from app.services.meeting_notes_service import ensure_meeting_notes
 from app.services.normalization_service import generate_normalized_transcript
-from app.services.summary_service import generate_summary
-from app.services.timeline_service import generate_timeline_for_meeting
+from app.services.summary_service import persist_summary_result, run_summary_ai
+from app.services.timeline_service import build_timeline_events, generate_timeline_for_meeting
 
 logger = logging.getLogger("converra")
 
@@ -88,8 +90,12 @@ def run_post_transcription_pipeline(
     if transcript.normalized_at is None:
         report(_STAGE_NORMALIZING, 93)
         logger.info("Pipeline: normalizing transcript for meeting %s", meeting_id)
+        t0 = time.perf_counter()
         try:
             generate_normalized_transcript(db, meeting_id)
+            logger.info(
+                "[timing] meeting %s normalize end elapsed=%.3fs", meeting_id, time.perf_counter() - t0
+            )
         except AppError as exc:
             # Normalization is an optional enhancement, not a prerequisite for
             # a summary: the raw transcript is always a valid summary input
@@ -126,9 +132,38 @@ def run_post_transcription_pipeline(
         return existing_summary
 
     report(_STAGE_SUMMARIZING, 96)
-    logger.info("Pipeline: generating summary for meeting %s", meeting_id)
-    summary = generate_summary(db, meeting_id)
+    logger.info("Pipeline: generating summary and timeline for meeting %s", meeting_id)
+    # Summary and Timeline are both independent AI-provider calls over the
+    # same transcript (Timeline never reads the Summary's content), so their
+    # two network round trips run concurrently here instead of one after the
+    # other. Each side does its own AI call only in its thread -- no DB
+    # access happens until both are back, since a SQLAlchemy `Session` isn't
+    # safe to use from more than one thread at a time. `run_summary_ai`
+    # raises `AppError` on failure (aborting the pipeline, same as before);
+    # `build_timeline_events` never raises (returns `None` to mean "leave
+    # timeline empty", same soft-fail contract Timeline has always had).
+    t0 = time.perf_counter()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        summary_future = executor.submit(run_summary_ai, transcript)
+        timeline_future = executor.submit(build_timeline_events, meeting_id, transcript)
+        summary_result = summary_future.result()
+        timeline_events = timeline_future.result()
+    logger.info(
+        "[timing] meeting %s summary+timeline(concurrent) elapsed=%.3fs",
+        meeting_id, time.perf_counter() - t0,
+    )
+
+    t0 = time.perf_counter()
+    summary = persist_summary_result(db, meeting_id=meeting_id, result=summary_result)
+    logger.info("[timing] meeting %s summary end elapsed=%.3fs", meeting_id, time.perf_counter() - t0)
+
     report(_STAGE_TIMELINE, 98)
-    summary = generate_timeline_for_meeting(db, meeting_id, summary)
+    if timeline_events is not None:
+        t0 = time.perf_counter()
+        summary = set_timeline_events(db, summary, timeline_events)
+        logger.info("[timing] meeting %s timeline end elapsed=%.3fs", meeting_id, time.perf_counter() - t0)
+
+    t0 = time.perf_counter()
     ensure_meeting_notes(db, meeting_id)
+    logger.info("[timing] meeting %s meeting_notes end elapsed=%.3fs", meeting_id, time.perf_counter() - t0)
     return summary

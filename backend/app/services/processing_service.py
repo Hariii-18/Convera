@@ -2,6 +2,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import asdict
 
 from fastapi import status
 from sqlalchemy.exc import IntegrityError
@@ -28,6 +29,13 @@ from app.models.processing_job import ACTIVE_STATUSES, ProcessingJob
 from app.models.upload import Upload
 from app.models.user import User
 from app.schemas.meeting import MeetingUpdate
+from app.services.diarization.factory import get_diarization_provider
+from app.services.pipeline_service import run_post_transcription_pipeline
+from app.services.speaker_alignment_service import (
+    align_transcript_segments,
+    sync_meeting_speakers_from_keys,
+)
+from app.services.transcription.base import is_unusable_transcription
 from app.workers.processor import (
     cancel_transcription_job,
     download_upload,
@@ -131,7 +139,19 @@ def _reload_active_job(db: Session, job_id: uuid.UUID) -> ProcessingJob | None:
     steps, which is how a queued/preparing job's cancellation takes effect
     (it simply never reaches the next step) and how a processing job's
     cancellation is confirmed after its worker process has been killed.
+
+    Expires this session's identity map first: `cancel_processing_job` runs
+    on a *different* `Session` (a request-scoped one; this function's caller
+    holds one long-lived session for the whole job). SQLAlchemy's identity
+    map does not refresh an already-loaded object's attributes from a new
+    query by default, so without this, a `job` object this session loaded
+    earlier (e.g. at `mark_job_started`) would keep reporting its status as
+    of that load — silently missing a cancellation committed by the other
+    session in between — until *this* session happens to commit something
+    of its own. Cheap: it only marks attributes for reload on next access,
+    it doesn't issue any queries by itself.
     """
+    db.expire_all()
     job = get_processing_job_by_id(db, job_id)
     if job is None or job.status == "cancelled":
         return None
@@ -361,18 +381,93 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
                 return
             job = update_job_progress(db, job, status="processing", stage="Saving transcript", progress=90)
 
-        upsert_transcript(
-            db,
-            meeting_id=job.meeting_id,
-            upload_id=job.upload_id,
-            language=result.language,
-            transcript=result.text,
-            segments=[asdict(segment) for segment in result.segments],
-            duration=result.duration,
-            word_count=result.word_count,
+            logger.info("[timing] job %s diarization start", job_id)
+            t0 = time.perf_counter()
+            try:
+                diarization_segments = get_diarization_provider().diarize(waveform)
+            except Exception:  # noqa: BLE001 (diarization is an enhancement, must never fail the job)
+                logger.exception(
+                    "Processing job %s: diarization failed, transcript will save with no speaker_key",
+                    job_id,
+                )
+                diarization_segments = []
+            logger.info(
+                "[timing] job %s diarization end elapsed=%.3fs segments=%d",
+                job_id, time.perf_counter() - t0, len(diarization_segments),
+            )
+
+            segments_with_speakers = align_transcript_segments(result.segments, diarization_segments)
+            speaker_keys = {
+                segment["speaker_key"] for segment in segments_with_speakers if segment["speaker_key"]
+            }
+
+            logger.info("[timing] job %s save_transcript start", job_id)
+            t0 = time.perf_counter()
+            upsert_transcript(
+                db,
+                meeting_id=job.meeting_id,
+                upload_id=job.upload_id,
+                language=result.language,
+                transcript=result.text,
+                segments=segments_with_speakers,
+                duration=result.duration,
+                word_count=result.word_count,
+                produced_by_job_id=job.id,
+            )
+            sync_meeting_speakers_from_keys(db, job.meeting_id, speaker_keys)
+            logger.info("[timing] job %s save_transcript end elapsed=%.3fs", job_id, time.perf_counter() - t0)
+        else:
+            logger.info(
+                "Processing job %s: transcript already saved for meeting %s, resuming at summary generation",
+                job_id, job.meeting_id,
+            )
+
+        logger.info("[timing] job %s release_transcription_resources start", job_id)
+        t0 = time.perf_counter()
+        await release_transcription_resources()
+        logger.info(
+            "[timing] job %s release_transcription_resources end elapsed=%.3fs",
+            job_id, time.perf_counter() - t0,
         )
 
-        job = get_processing_job_by_id(db, job_id)
+        job = _reload_active_job(db, job_id)
+        if job is None:
+            return
+
+        # Everything downstream of a finalized transcript — normalize, then
+        # summarize — lives in the shared pipeline so this same logic runs
+        # for both a recorded upload (here) and, in a later phase, a
+        # finalized Live Meeting transcript. It's resumable on its own: a
+        # meeting that already has a normalized transcript and/or a summary
+        # skips straight past those steps, so a retry never re-normalizes or
+        # re-summarizes work that already succeeded.
+        logger.info("Processing job %s: starting post-transcription pipeline", job_id)
+        t0 = time.perf_counter()
+        try:
+            run_post_transcription_pipeline(
+                db, job.meeting_id, on_stage=_pipeline_stage_reporter(db, job_id)
+            )
+        except _JobCancelled:
+            return
+        except AppError as exc:
+            # The transcript (and normalized transcript, if that step had
+            # already succeeded) is left untouched — only the failed step is
+            # marked failed, and a retry of this job resumes from it without
+            # re-transcribing or redoing earlier pipeline steps.
+            logger.warning(
+                "Processing job %s post-transcription pipeline failed (prior steps preserved): %s",
+                job_id, exc.message,
+            )
+            job = _reload_active_job(db, job_id)
+            if job is not None:
+                _finalize_job(
+                    db, job, job_status="failed", meeting_status="failed",
+                    error_message=exc.message,
+                )
+            return
+        logger.info("[timing] job %s pipeline end elapsed=%.3fs", job_id, time.perf_counter() - t0)
+
+        job = _reload_active_job(db, job_id)
         if job is None:
             return
 
@@ -382,6 +477,17 @@ async def execute_processing_job(job_id: uuid.UUID) -> None:
         logger.info("[timing] job %s finalization end elapsed=%.3fs", job_id, time.perf_counter() - t0)
         logger.info("Processing job %s completed for upload %s", job.id, upload.id)
     except Exception as exc:  # noqa: BLE001 (worker failure must never crash the task loop)
+        # `db.expire_all()` before this lookup for the same reason as
+        # `_reload_active_job`: cancellation almost always reaches this
+        # handler *because* `cancel_processing_job` (on its own, different
+        # `Session`) just killed the transcription worker process this job
+        # was awaiting, breaking its pipe -- which races the identity-mapped
+        # `job` this session loaded earlier against that other session's
+        # just-committed "cancelled" status. Without expiring first, this
+        # would misclassify a cancellation as a failure (wrong terminal
+        # status, wrong user-facing notification) whenever it lands here
+        # before this session's own next unrelated commit.
+        db.expire_all()
         job = get_processing_job_by_id(db, job_id)
         if job is not None and job.status == "cancelled":
             # Killing the transcription worker process (`cancel_processing_job`)

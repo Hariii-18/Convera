@@ -31,11 +31,28 @@ class FasterWhisperProvider(TranscriptionProvider):
             settings.whisper_device,
             settings.whisper_compute_type,
         )
-        self._model = WhisperModel(
-            self.model_size,
-            device=settings.whisper_device,
-            compute_type=settings.whisper_compute_type,
-        )
+        model_kwargs = dict(device=settings.whisper_device, compute_type=settings.whisper_compute_type)
+        try:
+            # This provider is documented (see module docstring) as running
+            # entirely on-device with no external API calls, but without
+            # `local_files_only`, `WhisperModel` still makes a Hugging Face
+            # Hub API request on *every* load to check for a newer model
+            # revision before falling back to the local cache (visible as a
+            # `GET huggingface.co/api/models/.../revision/main` in the logs
+            # on every job). Once the weights are cached locally -- the
+            # steady-state case in any long-running deployment -- that round
+            # trip is pure per-job latency (and a needless network
+            # dependency for an explicitly local provider) with no freshness
+            # benefit. Falls back below to a normal (network-allowed) load
+            # for the one case this would otherwise break: the very first
+            # run after `whisper_model_size`/`whisper_fallback_model_size`
+            # is set to a model that has never been downloaded yet.
+            self._model = WhisperModel(self.model_size, local_files_only=True, **model_kwargs)
+        except Exception:
+            logger.info(
+                "faster-whisper model '%s' not found in local cache; downloading", self.model_size
+            )
+            self._model = WhisperModel(self.model_size, **model_kwargs)
         logger.info("Loaded faster-whisper model '%s'", self.model_size)
 
     def transcribe(self, audio: np.ndarray, *, sample_rate: int = 16000) -> TranscriptionResult:
@@ -67,7 +84,16 @@ class FasterWhisperProvider(TranscriptionProvider):
             text = segment.text.strip()
             if not text:
                 continue
-            segments.append(TranscriptSegment(start=segment.start, end=segment.end, text=text))
+            segments.append(
+                TranscriptSegment(
+                    start=segment.start,
+                    end=segment.end,
+                    text=text,
+                    avg_logprob=segment.avg_logprob,
+                    no_speech_prob=segment.no_speech_prob,
+                    compression_ratio=segment.compression_ratio,
+                )
+            )
             text_parts.append(text)
             avg_logprobs.append(segment.avg_logprob)
             no_speech_probs.append(segment.no_speech_prob)

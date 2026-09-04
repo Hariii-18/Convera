@@ -27,6 +27,7 @@ is acceptable in this environment.
 from __future__ import annotations
 
 import logging
+import time
 
 import numpy as np
 from faster_whisper.vad import VadOptions, get_speech_timestamps
@@ -57,11 +58,13 @@ class MfccDiarizationProvider(DiarizationProvider):
         self.distance_threshold = distance_threshold
 
     def diarize(self, audio: np.ndarray, *, sample_rate: int = 16000) -> list[DiarizationSegment]:
+        t0 = time.perf_counter()
         speech_chunks = get_speech_timestamps(
             audio,
             VadOptions(threshold=0.35, min_speech_duration_ms=200, speech_pad_ms=200),
             sampling_rate=sample_rate,
         )
+        logger.info("[timing] diarization vad elapsed=%.3fs", time.perf_counter() - t0)
         if not speech_chunks:
             return []
 
@@ -73,6 +76,7 @@ class MfccDiarizationProvider(DiarizationProvider):
         if not windows:
             return []
 
+        t0 = time.perf_counter()
         embeddings: list[np.ndarray] = []
         kept_windows: list[tuple[float, float]] = []
         for start, end in windows:
@@ -82,13 +86,19 @@ class MfccDiarizationProvider(DiarizationProvider):
                 continue
             embeddings.append(embedding)
             kept_windows.append((start, end))
+        logger.info(
+            "[timing] diarization feature_extraction elapsed=%.3fs windows=%d",
+            time.perf_counter() - t0, len(windows),
+        )
 
         if not kept_windows:
             return []
 
+        t0 = time.perf_counter()
         cluster_ids = cluster_embeddings(
             np.stack(embeddings), distance_threshold=self.distance_threshold
         )
+        logger.info("[timing] diarization clustering elapsed=%.3fs", time.perf_counter() - t0)
         speaker_keys = _stable_speaker_keys(cluster_ids, kept_windows)
 
         segments = _prune_short_segments(_merge_windows(kept_windows, speaker_keys))

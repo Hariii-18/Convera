@@ -27,6 +27,16 @@ class TranscriptSegment:
     # existing construction site (providers that predate diarization, or
     # that never assign one) is unaffected.
     speaker_key: str | None = None
+    # Per-segment counterparts of `TranscriptionResult`'s aggregate confidence
+    # signals, when the provider supplies them (faster-whisper does). `None`
+    # for callers that never set them (live-worker's finalized segments,
+    # verification fixtures, ...) so `is_unusable_segment` just falls back to
+    # its text-only heuristics for those. Populated by the recorded-upload
+    # provider so `has_unusable_segment` can screen individual segments —
+    # see that function's docstring.
+    avg_logprob: float | None = None
+    no_speech_prob: float | None = None
+    compression_ratio: float | None = None
 
 
 @dataclass
@@ -134,6 +144,32 @@ def is_unusable_segment(
     if _alpha_ratio(text) < _MIN_ALPHA_RATIO:
         return True
     return _low_confidence_signal(avg_logprob, no_speech_prob, compression_ratio)
+
+
+def has_unusable_segment(segments: list[TranscriptSegment]) -> bool:
+    """True when at least one segment of an otherwise-successful recorded
+    transcript looks hallucinated/garbled by `is_unusable_segment`'s
+    heuristics, even though `is_unusable_transcription`'s whole-file
+    aggregate signals don't catch it -- a short bad region gets diluted by
+    many good segments once averaged over the whole recording.
+
+    Used by the recorded-upload path (see `subprocess_runner.py`) to also
+    trigger the existing base->fallback retry on a localized bad region,
+    rather than dropping the offending segment outright: unlike the live
+    meeting worker's per-window stream (where dropping one bad window just
+    shortens a live caption briefly), a recording's transcript is the
+    persisted record, so a silently dropped segment would leave a permanent
+    gap in it instead of a bounded, logged retry.
+    """
+    return any(
+        is_unusable_segment(
+            segment.text,
+            avg_logprob=segment.avg_logprob,
+            no_speech_prob=segment.no_speech_prob,
+            compression_ratio=segment.compression_ratio,
+        )
+        for segment in segments
+    )
 
 
 def is_unusable_transcription(result: TranscriptionResult) -> bool:

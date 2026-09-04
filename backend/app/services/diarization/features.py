@@ -79,6 +79,15 @@ def _dct_matrix(n_in: int, n_out: int) -> np.ndarray:
 # a given `sample_rate` (fixed frame length below) -- build once per process.
 _fbank_cache: dict[tuple[int, int], np.ndarray] = {}
 _dct_cache: np.ndarray | None = None
+# Hamming windows depend only on frame length, which is constant per
+# sample_rate for each of the two frame sizes here (25ms MFCC frames, 40ms
+# pitch frames) -- `compute_mfcc` builds one per call and
+# `_estimate_pitch_track` builds one per *frame* inside its loop (tens of
+# thousands of times over a real recording's diarization windows), so
+# caching this the same way as the filterbank/DCT above is a pure
+# memoization: identical `np.hamming(n)` output, just computed once per
+# distinct frame length instead of on every call.
+_hamming_cache: dict[int, np.ndarray] = {}
 
 
 def _get_filterbank(n_fft: int, sample_rate: int) -> np.ndarray:
@@ -95,6 +104,14 @@ def _get_dct() -> np.ndarray:
     return _dct_cache
 
 
+def _get_hamming(frame_len: int) -> np.ndarray:
+    window = _hamming_cache.get(frame_len)
+    if window is None:
+        window = np.hamming(frame_len)
+        _hamming_cache[frame_len] = window
+    return window
+
+
 def compute_mfcc(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     """Frames `audio` (mono float32, [-1, 1]) into 25ms/10ms-hop windows and
     returns MFCCs, shape `(n_frames, _N_MFCC)`. `n_frames` is 0 for audio
@@ -108,7 +125,7 @@ def compute_mfcc(audio: np.ndarray, sample_rate: int) -> np.ndarray:
     n_frames = 1 + (audio.shape[0] - frame_len) // hop_len
     idx = np.arange(frame_len)[None, :] + hop_len * np.arange(n_frames)[:, None]
     frames = audio[idx].astype(np.float64)
-    frames *= np.hamming(frame_len)
+    frames *= _get_hamming(frame_len)
 
     n_fft = 1
     while n_fft < frame_len:
@@ -141,7 +158,7 @@ def _estimate_pitch_track(audio: np.ndarray, sample_rate: int) -> np.ndarray:
         frame = frame - frame.mean()
         if np.max(np.abs(frame)) < 1e-4:  # near-silent frame, no pitch to find
             continue
-        frame = frame * np.hamming(frame_len)
+        frame = frame * _get_hamming(frame_len)
         autocorr = np.correlate(frame, frame, mode="full")[frame_len - 1 :]
         if autocorr[0] <= 0 or lag_max >= autocorr.shape[0]:
             continue

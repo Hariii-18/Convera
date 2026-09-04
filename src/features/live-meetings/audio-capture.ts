@@ -15,6 +15,8 @@ export type CaptureState =
   | "idle"
   | "requesting_permission"
   | "capturing"
+  /** Only reachable via `pause()` — Live Meeting never calls it, so it never enters this state. */
+  | "paused"
   | "stopping"
   | "error";
 
@@ -199,21 +201,45 @@ export class AudioCaptureController {
   }
 
   private handleTrackEnded() {
-    if (this.state === "capturing") {
+    if (this.state === "capturing" || this.state === "paused") {
       this.emitError("device_lost", "The microphone was disconnected or its access was revoked.");
     }
   }
 
-  /** Stops the recorder, waits for the final `dataavailable` flush, then releases the microphone. Safe to call from any state. */
-  async stopCapture(): Promise<void> {
-    if (this.state === "idle") return;
-    if (this.state === "stopping") return;
+  /** Pauses an in-progress capture. No-op outside `"capturing"`. */
+  pause(): void {
+    if (this.state !== "capturing") return;
+    if (!this.recorder || this.recorder.state !== "recording") return;
+    this.recorder.pause();
+    console.debug("[live-capture] paused");
+    this.setState("paused");
+  }
+
+  /** Resumes a paused capture. No-op outside `"paused"`. */
+  resume(): void {
+    if (this.state !== "paused") return;
+    if (!this.recorder || this.recorder.state !== "paused") return;
+    this.recorder.resume();
+    console.debug("[live-capture] resumed");
+    this.setState("capturing");
+  }
+
+  /**
+   * Stops the recorder, waits for the final `dataavailable` flush, then
+   * releases the microphone. Safe to call from any state, including
+   * `"paused"`. Resolves with a snapshot of every chunk captured this
+   * session — callers that only need the side effect (Live Meeting) can
+   * ignore the return value.
+   */
+  async stopCapture(): Promise<readonly AudioChunkMeta[]> {
+    if (this.state === "idle") return this.chunks;
+    if (this.state === "stopping") return this.chunks;
 
     const recorder = this.recorder;
     if (!recorder || recorder.state === "inactive") {
       this.releaseStream();
       this.setState("idle");
-      return;
+      return this.chunks;
     }
 
     this.setState("stopping");
@@ -225,6 +251,20 @@ export class AudioCaptureController {
 
     console.debug(`[live-capture] stopped — ${this.chunks.length} chunk(s) captured`);
     this.releaseStream();
+    this.setState("idle");
+    return this.chunks;
+  }
+
+  /**
+   * Immediate hard stop for a user-initiated Cancel: releases the
+   * microphone right away without waiting for a final flush, discards any
+   * captured chunks, and (unlike `destroy()`) notifies listeners so a
+   * mounted UI resets to idle.
+   */
+  cancelCapture(): void {
+    if (this.state === "idle") return;
+    this.releaseStream();
+    this.chunks = [];
     this.setState("idle");
   }
 

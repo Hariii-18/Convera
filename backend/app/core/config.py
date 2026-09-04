@@ -69,6 +69,18 @@ class Settings(BaseSettings):
     normalization_ai_provider: str = "openai"
     openai_normalization_model: str = "gpt-4.1"
 
+    # Fixed output language for AI-*generated* meeting intelligence (Summary
+    # sections and Timeline event labels — see
+    # `app.services.summary_service.run_summary_ai` and
+    # `app.services.timeline_service.build_timeline_events`). Deliberately
+    # independent of `transcript.language` (the spoken language Whisper
+    # detected — see `app.services.transcription.faster_whisper`) and of any
+    # request/browser locale: those describe the meeting audio, not what
+    # language the AI should write in. Normalization and translation are
+    # untouched by this — they must keep preserving/targeting the
+    # transcript's own language, not this one.
+    ai_output_language: str = "English"
+
     # Resend (https://resend.com) is used to email Meeting Notes exports —
     # see `app.services.email.resend_provider`. `resend_from_email` must be a
     # verified sender/domain in the Resend account.

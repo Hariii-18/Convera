@@ -67,7 +67,21 @@ export function useAudioCapture(onChunkCaptured?: (chunk: AudioChunkMeta) => voi
   }, [controller]);
 
   const stopCapture = React.useCallback(async () => {
-    await controller.stopCapture();
+    return controller.stopCapture();
+  }, [controller]);
+
+  const pause = React.useCallback(() => {
+    controller.pause();
+  }, [controller]);
+
+  const resume = React.useCallback(() => {
+    controller.resume();
+  }, [controller]);
+
+  const cancelCapture = React.useCallback(() => {
+    controller.cancelCapture();
+    setChunks([]);
+    setError(null);
   }, [controller]);
 
   const mimeType = chunks[0]?.mimeType ?? null;
@@ -80,5 +94,8 @@ export function useAudioCapture(onChunkCaptured?: (chunk: AudioChunkMeta) => voi
     error,
     startCapture,
     stopCapture,
+    pause,
+    resume,
+    cancelCapture,
   };
 }

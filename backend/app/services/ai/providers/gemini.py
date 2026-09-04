@@ -37,7 +37,9 @@ class GeminiProvider(AIProvider):
     def extract_action_items(self, text: str) -> ActionItemsResult:
         raise NotImplementedError
 
-    def generate_timeline(self, chunks: list[TranscriptChunk]) -> TimelineResult:
+    def generate_timeline(
+        self, chunks: list[TranscriptChunk], *, language: str | None = None
+    ) -> TimelineResult:
         raise NotImplementedError
 
     def generate_structured_summary(

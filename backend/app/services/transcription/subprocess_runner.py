@@ -24,13 +24,18 @@ from __future__ import annotations
 import logging
 import multiprocessing as mp
 import threading
+import time
 import traceback
 import uuid
 from multiprocessing.connection import Connection
 
 import numpy as np
 
-from app.services.transcription.base import TranscriptionResult, is_unusable_transcription
+from app.services.transcription.base import (
+    TranscriptionResult,
+    has_unusable_segment,
+    is_unusable_transcription,
+)
 from app.services.transcription.process_utils import terminate_process
 
 logger = logging.getLogger("converra")
@@ -67,34 +72,92 @@ def _worker_entrypoint(
     starts -- lives only in this process and dies with it.
     """
     logging.basicConfig(level=logging.INFO)
+    t_worker_start = time.perf_counter()
+    # This process's own `[timing]` logs go to its own stderr (a separate OS
+    # process, inherited fd, invisible to the parent's `logging` handlers) --
+    # collected here and sent back over `conn` alongside the result so the
+    # parent can re-log them under its own logger for anything (e.g. the
+    # benchmark harness) that's listening for `[timing]` lines there.
+    timings: dict[str, float] = {}
     try:
         from app.services.transcription.factory import get_transcription_provider
 
+        t0 = time.perf_counter()
         base_provider = get_transcription_provider(base_model_size)
+        timings[f"transcription child model_load({base_model_size})"] = time.perf_counter() - t0
+        logger.info(
+            "[timing] transcription child model_load(%s) elapsed=%.3fs (since process start=%.3fs)",
+            base_model_size, timings[f"transcription child model_load({base_model_size})"],
+            time.perf_counter() - t_worker_start,
+        )
+
+        t0 = time.perf_counter()
         result = base_provider.transcribe(audio, sample_rate=sample_rate)
+        timings[f"transcription child inference({base_model_size})"] = time.perf_counter() - t0
+        logger.info(
+            "[timing] transcription child inference(%s) elapsed=%.3fs",
+            base_model_size, timings[f"transcription child inference({base_model_size})"],
+        )
         model_used = base_model_size
         fallback_reason: str | None = None
 
-        if is_unusable_transcription(result):
-            fallback_reason = (
-                f"base model '{base_model_size}' produced unusable output "
-                f"(segments={len(result.segments)}, word_count={result.word_count})"
-            )
+        result_unusable = is_unusable_transcription(result)
+        # Checked separately (and only when the aggregate pass already looks
+        # fine) because a short hallucinated/garbled region is exactly what
+        # whole-file averaging hides: a few bad segments among many good ones
+        # don't move the mean compression ratio / logprob / no-speech-prob
+        # enough to trip `is_unusable_transcription` -- see
+        # `has_unusable_segment`'s docstring.
+        segment_flagged = not result_unusable and has_unusable_segment(result.segments)
+        if result_unusable or segment_flagged:
+            if result_unusable:
+                fallback_reason = (
+                    f"base model '{base_model_size}' produced unusable output "
+                    f"(segments={len(result.segments)}, word_count={result.word_count})"
+                )
+            else:
+                fallback_reason = (
+                    f"base model '{base_model_size}' produced a localized suspicious "
+                    f"segment despite passing whole-file aggregate checks "
+                    f"(segments={len(result.segments)}, word_count={result.word_count})"
+                )
             logger.warning(
                 "Transcription fallback triggered: %s -> retrying with '%s'",
                 fallback_reason, fallback_model_size,
             )
+            t0 = time.perf_counter()
             fallback_provider = get_transcription_provider(fallback_model_size)
+            timings[f"transcription child model_load({fallback_model_size})"] = time.perf_counter() - t0
+            logger.info(
+                "[timing] transcription child model_load(%s) elapsed=%.3fs",
+                fallback_model_size, timings[f"transcription child model_load({fallback_model_size})"],
+            )
+            t0 = time.perf_counter()
             fallback_result = fallback_provider.transcribe(audio, sample_rate=sample_rate)
+            timings[f"transcription child inference({fallback_model_size})"] = time.perf_counter() - t0
+            logger.info(
+                "[timing] transcription child inference(%s) elapsed=%.3fs",
+                fallback_model_size, timings[f"transcription child inference({fallback_model_size})"],
+            )
             if is_unusable_transcription(fallback_result):
                 logger.warning(
                     "Fallback model '%s' also produced unusable output (segments=%d, word_count=%d)",
                     fallback_model_size, len(fallback_result.segments), fallback_result.word_count,
                 )
+            elif has_unusable_segment(fallback_result.segments):
+                logger.warning(
+                    "Fallback model '%s' still produced a localized suspicious segment "
+                    "(segments=%d, word_count=%d); keeping its output as the best available",
+                    fallback_model_size, len(fallback_result.segments), fallback_result.word_count,
+                )
+            # Either way, the fallback's output is used -- same as the
+            # pre-existing "both models unusable" case: a best-effort
+            # transcript that's flagged in the logs beats failing the whole
+            # job over one bad region.
             result = fallback_result
             model_used = fallback_model_size
 
-        conn.send(("ok", result, model_used, fallback_reason))
+        conn.send(("ok", result, model_used, fallback_reason, timings))
     except BaseException:  # the child must report every failure before exiting, never crash silently
         conn.send(("error", traceback.format_exc()))
     finally:
@@ -138,7 +201,12 @@ def run_transcription_job(
     )
     with _active_lock:
         _active_processes[job_id] = process
+    t_spawn = time.perf_counter()
     process.start()
+    logger.info(
+        "[timing] job %s transcription process_spawn elapsed=%.3fs",
+        job_id, time.perf_counter() - t_spawn,
+    )
     child_conn.close()  # only the child's end writes to this pipe
     logger.info(
         "Started transcription worker process pid=%s for job %s", process.pid, job_id
@@ -162,7 +230,9 @@ def run_transcription_job(
             _, tb_text = outcome
             raise RuntimeError(f"Transcription worker process (pid={process.pid}) failed:\n{tb_text}")
 
-        _, result, model_used, fallback_reason = outcome
+        _, result, model_used, fallback_reason, child_timings = outcome
+        for label, secs in child_timings.items():
+            logger.info("[timing] %s elapsed=%.3fs", label, secs)
         return result, model_used, fallback_reason
     finally:
         parent_conn.close()

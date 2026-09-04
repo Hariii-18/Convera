@@ -134,13 +134,16 @@ class OllamaProvider(AIProvider):
         ]
         return ActionItemsResult(items=items)
 
-    def generate_timeline(self, chunks: list[TranscriptChunk]) -> TimelineResult:
+    def generate_timeline(
+        self, chunks: list[TranscriptChunk], *, language: str | None = None
+    ) -> TimelineResult:
+        language_hint = f" Write every label in {language}." if language else ""
         transcript_block = "\n".join(f"[{chunk.start:.1f}s] {chunk.text}" for chunk in chunks)
         prompt = (
             "The following is a timestamped transcript. Identify key topic changes or "
             'notable moments. Return a JSON array of objects with keys "start" (the '
             'timestamp in seconds, as a number) and "label" (a short description). '
-            "Return only the JSON array, no other text.\n\n"
+            f"Return only the JSON array, no other text.{language_hint}\n\n"
             f"Transcript:\n{transcript_block}\n\nJSON:"
         )
         raw = self._generate(prompt)

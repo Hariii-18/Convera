@@ -241,14 +241,19 @@ class OpenAIProvider(AIProvider):
     def extract_action_items(self, text: str) -> ActionItemsResult:
         raise NotImplementedError("OpenAIProvider only implements generate_structured_summary")
 
-    def generate_timeline(self, chunks: list[TranscriptChunk]) -> TimelineResult:
+    def generate_timeline(
+        self, chunks: list[TranscriptChunk], *, language: str | None = None
+    ) -> TimelineResult:
         if not chunks:
             return TimelineResult(events=[])
 
+        language_hint = f" Write every label in {language}." if language else ""
         indexed = [
             {"start": chunk.start, "end": chunk.end, "text": chunk.text} for chunk in chunks
         ]
-        user_prompt = f"Transcript chunks:\n{json.dumps(indexed, ensure_ascii=False)}"
+        user_prompt = (
+            f"{language_hint}\n\nTranscript chunks:\n{json.dumps(indexed, ensure_ascii=False)}".strip()
+        )
 
         raw = self._chat_completion_json(
             system_prompt=_TIMELINE_SYSTEM_PROMPT, user_prompt=user_prompt

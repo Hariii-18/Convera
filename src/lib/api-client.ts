@@ -26,13 +26,16 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// `/auth/login` and `/auth/register` return 401/other errors for a rejected
-// *attempt* (wrong password, etc.) — that says nothing about an existing
-// session's token, so it must never be treated as "the session is invalid."
+// `/auth/login`, `/auth/register`, and `/auth/me/password` return 401/other
+// errors for a rejected *attempt* (wrong password, etc.) — that says nothing
+// about an existing session's token, so it must never be treated as "the
+// session is invalid." `/auth/me/password` in particular 401s when the
+// *current* password field is wrong, which is a validation failure on a
+// logged-in user's own request, not an expired/invalid bearer token.
 // Every other 401 comes from the backend's `get_current_user` dependency
 // rejecting the bearer token itself (missing, expired, or otherwise
 // invalid), which is the only case that should end the session.
-const AUTH_ATTEMPT_PATHS = ["/auth/login", "/auth/register"];
+const AUTH_ATTEMPT_PATHS = ["/auth/login", "/auth/register", "/auth/me/password"];
 
 function isAuthAttemptRequest(url?: string): boolean {
   return Boolean(url) && AUTH_ATTEMPT_PATHS.some((path) => url!.includes(path));

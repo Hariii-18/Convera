@@ -73,6 +73,17 @@ def align_transcript_segments(
     return enriched
 
 
+def _sort_key(speaker_key: str) -> tuple[int, str]:
+    """Numeric-first ordering so `speaker_2` sorts before `speaker_10` (a
+    plain string sort would not), which matters here because diarization
+    (`mfcc_diarizer._stable_speaker_keys`) assigns its raw keys in strict
+    first-appearance order -- sorting keys this way reproduces that
+    chronological order without needing timestamps at this layer.
+    """
+    match = _KEY_INDEX_PATTERN.match(speaker_key)
+    return (int(match.group(1)), speaker_key) if match else (10**9, speaker_key)
+
+
 def sync_meeting_speakers_from_keys(
     db: Session, meeting_id: uuid.UUID, speaker_keys: set[str]
 ) -> None:
@@ -84,21 +95,41 @@ def sync_meeting_speakers_from_keys(
 
     Never called with `None` -- `align_transcript_segments`'s `None` results
     (no reliable overlap) are filtered out by the caller before this runs.
+
+    The placeholder `display_name` given to a new row is a *contiguous*
+    "Speaker N" counted from the number of `MeetingSpeaker` rows this meeting
+    already has, not the numeric suffix of `speaker_key` itself. Diarization
+    can produce more internal clusters (`speaker_1`, `speaker_2`, ...) than
+    ever end up the closest overlap for a real transcript segment -- e.g.
+    `speaker_2`/`speaker_3` cluster a few short interjections that always
+    lose the overlap contest to a longer neighboring segment -- so the surviving
+    keys passed in here (`speaker_1`, `speaker_4`) can already have gaps.
+    Renumbering only the display label (never `speaker_key` itself, which
+    stays the stable identity used for `Transcript.segments`,
+    `MeetingSpeaker.speaker_key`, and rename lookups) keeps what's shown to
+    users contiguous without touching persistence, renames, or the
+    diarization/clustering output itself.
     """
     if not speaker_keys:
         return
 
-    existing_keys = {speaker.speaker_key for speaker in list_speakers_by_meeting(db, meeting_id)}
-    for key in sorted(speaker_keys - existing_keys):
-        match = _KEY_INDEX_PATTERN.match(key)
-        label = match.group(1) if match else key
+    existing = list_speakers_by_meeting(db, meeting_id)
+    existing_keys = {speaker.speaker_key for speaker in existing}
+    new_keys = sorted(speaker_keys - existing_keys, key=_sort_key)
+
+    next_ordinal = len(existing) + 1
+    for key in new_keys:
         create_speaker(
             db,
             meeting_id=meeting_id,
             speaker_key=key,
-            display_name=f"Speaker {label}",
+            display_name=f"Speaker {next_ordinal}",
             role=None,
             company=None,
             notes=None,
         )
-        logger.info("Created MeetingSpeaker %s for meeting %s from diarization", key, meeting_id)
+        logger.info(
+            "Created MeetingSpeaker %s for meeting %s from diarization (display name Speaker %d)",
+            key, meeting_id, next_ordinal,
+        )
+        next_ordinal += 1

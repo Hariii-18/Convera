@@ -18,12 +18,54 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.crud.summary import set_timeline_events
 from app.crud.transcript import get_transcript_by_meeting_id
 from app.models.summary import Summary
+from app.models.transcript import Transcript
 from app.services.ai import TranscriptChunk, get_summary_ai_provider
 
 logger = logging.getLogger("converra")
+
+
+def build_timeline_events(meeting_id: uuid.UUID, transcript: Transcript | None) -> list[dict] | None:
+    """The AI-provider half of Timeline generation: no DB writes, so it's
+    safe to call from a concurrent context (e.g. alongside Summary
+    generation — see `pipeline_service`). Returns `None` (never raises) for
+    every case that should leave `timeline_events` untouched — a missing
+    transcript, no usable text, or a provider error — matching
+    `generate_timeline_for_meeting`'s existing "never block the pipeline"
+    contract, just split out so it can run standalone.
+    """
+    if transcript is None:
+        return None
+
+    segments = transcript.normalized_segments or transcript.segments
+    chunks = [
+        TranscriptChunk(start=segment["start"], end=segment["end"], text=segment["text"])
+        for segment in segments
+        if segment.get("text", "").strip()
+    ]
+    if not chunks:
+        return None
+
+    try:
+        result = get_summary_ai_provider().generate_timeline(
+            chunks, language=get_settings().ai_output_language
+        )
+    except Exception as exc:
+        logger.warning(
+            "Timeline generation failed for meeting %s, leaving timeline empty (retryable): %s",
+            meeting_id,
+            exc,
+        )
+        return None
+
+    return [
+        {"start": event.start, "label": event.label}
+        for event in sorted(result.events, key=lambda e: e.start)
+        if event.label.strip()
+    ]
 
 
 def generate_timeline_for_meeting(db: Session, meeting_id: uuid.UUID, summary: Summary) -> Summary:
@@ -40,31 +82,7 @@ def generate_timeline_for_meeting(db: Session, meeting_id: uuid.UUID, summary: S
     instead.
     """
     transcript = get_transcript_by_meeting_id(db, meeting_id)
-    if transcript is None:
+    events = build_timeline_events(meeting_id, transcript)
+    if events is None:
         return summary
-
-    segments = transcript.normalized_segments or transcript.segments
-    chunks = [
-        TranscriptChunk(start=segment["start"], end=segment["end"], text=segment["text"])
-        for segment in segments
-        if segment.get("text", "").strip()
-    ]
-    if not chunks:
-        return summary
-
-    try:
-        result = get_summary_ai_provider().generate_timeline(chunks)
-    except Exception as exc:
-        logger.warning(
-            "Timeline generation failed for meeting %s, leaving timeline empty (retryable): %s",
-            meeting_id,
-            exc,
-        )
-        return summary
-
-    events = [
-        {"start": event.start, "label": event.label}
-        for event in sorted(result.events, key=lambda e: e.start)
-        if event.label.strip()
-    ]
     return set_timeline_events(db, summary, events)

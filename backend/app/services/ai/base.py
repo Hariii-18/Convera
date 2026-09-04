@@ -144,8 +144,13 @@ class AIProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def generate_timeline(self, chunks: list[TranscriptChunk]) -> TimelineResult:
-        """Generates labeled timeline events from transcript chunks."""
+    def generate_timeline(
+        self, chunks: list[TranscriptChunk], *, language: str | None = None
+    ) -> TimelineResult:
+        """Generates labeled timeline events from transcript chunks, with
+        event labels written in `language` (the app's configured
+        `AI_OUTPUT_LANGUAGE`, not the transcript's spoken language).
+        """
         raise NotImplementedError
 
     @abstractmethod

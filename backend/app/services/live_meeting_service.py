@@ -43,7 +43,7 @@ from app.crud.live_meeting_session import (
 from app.crud.meeting import create_meeting, get_meeting_by_id, update_meeting_status
 from app.crud.processing_job import list_processing_jobs
 from app.crud.transcript import get_transcript_by_meeting_id, upsert_transcript
-from app.crud.upload import create_upload, list_uploads_by_meeting_id
+from app.crud.upload import create_upload, list_uploads_by_meeting_id, mark_upload_completed
 from app.models.live_meeting_session import LiveMeetingSession
 from app.models.user import User
 from app.schemas.live_meeting import TERMINAL_LIVE_STATES, LiveMeetingSessionRead
@@ -319,6 +319,11 @@ def _get_or_create_live_placeholder_upload(db: Session, session: LiveMeetingSess
         mime_type=_LIVE_PLACEHOLDER_MIME_TYPE,
         size_bytes=0,
     )
+    # There's no real upload phase for this placeholder -- it never sits in
+    # an "uploading" state waiting on bytes -- so leaving the CRUD default
+    # of "uploading" would show every Live Meeting stuck "Uploading" forever
+    # on the Uploads page even after the meeting completes.
+    mark_upload_completed(db, upload)
     return upload.id
 
 

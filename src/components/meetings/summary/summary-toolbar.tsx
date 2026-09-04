@@ -95,7 +95,7 @@ function SummaryToolbar({
         </span>
       )}
 
-      <div className="ml-auto flex items-center gap-2">
+      <div className="ml-auto flex flex-wrap items-center gap-2">
         <CopyButton text={summaryText} label="Copy Summary" onCopy={onCopy} />
 
         <Separator orientation="vertical" className="h-5" />
